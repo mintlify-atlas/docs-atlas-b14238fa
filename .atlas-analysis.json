@@ -1,0 +1,165 @@
+{
+  "projectType": "framework",
+  "projectName": "Infinitic",
+  "projectDescription": "An open source orchestration framework for building durable and flexible backend processes with workflows and microservices",
+  "theme": "aspen",
+  "primaryColor": "#1484fb",
+  "lightColor": "#94c7ee",
+  "darkColor": "#4a86e9",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/workflows",
+              "concepts/services",
+              "concepts/workers",
+              "concepts/clients",
+              "concepts/architecture"
+            ]
+          },
+          {
+            "group": "Workflows",
+            "pages": [
+              "workflows/overview",
+              "workflows/defining-workflows",
+              "workflows/workflow-methods",
+              "workflows/calling-services",
+              "workflows/sub-workflows",
+              "workflows/channels",
+              "workflows/timers",
+              "workflows/versioning"
+            ]
+          },
+          {
+            "group": "Services",
+            "pages": [
+              "services/overview",
+              "services/defining-services",
+              "services/service-context",
+              "services/delegated-tasks",
+              "services/batching"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/overview",
+              "configuration/workers",
+              "configuration/clients",
+              "configuration/transport",
+              "configuration/storage"
+            ]
+          },
+          {
+            "group": "Infrastructure",
+            "pages": [
+              "infrastructure/pulsar",
+              "infrastructure/storage-backends",
+              "infrastructure/deployment"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/error-handling",
+              "advanced/retry-policies",
+              "advanced/timeouts",
+              "advanced/tags",
+              "advanced/metadata",
+              "advanced/cloud-events",
+              "advanced/monitoring"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Classes",
+            "pages": [
+              "api/workflow",
+              "api/infinitic-client",
+              "api/infinitic-worker",
+              "api/deferred"
+            ]
+          },
+          {
+            "group": "Annotations",
+            "pages": [
+              "api/annotations/name",
+              "api/annotations/retry",
+              "api/annotations/timeout",
+              "api/annotations/batch",
+              "api/annotations/delegated",
+              "api/annotations/ignore"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "api/config/worker-config",
+              "api/config/client-config",
+              "api/config/transport-config",
+              "api/config/storage-config"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Examples",
+        "groups": [
+          {
+            "group": "Use Cases",
+            "pages": [
+              "examples/hello-world",
+              "examples/booking-workflow",
+              "examples/approval-workflow",
+              "examples/saga-pattern",
+              "examples/long-running-tasks"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Durable workflow orchestration with state persistence",
+    "Event-driven architecture with Apache Pulsar",
+    "Automatic retry and timeout handling",
+    "Multiple storage backends (Redis, MySQL, PostgreSQL)",
+    "Tag-based workflow and task management",
+    "CloudEvents integration for observability",
+    "Dashboard for monitoring and debugging",
+    "Flexible configuration with YAML or builders"
+  ],
+  "publicApiSurface": [
+    "io.infinitic.workflows.Workflow",
+    "io.infinitic.clients.InfiniticClient",
+    "io.infinitic.workers.InfiniticWorker",
+    "io.infinitic.clients.Deferred",
+    "io.infinitic.tasks.Task",
+    "@Name",
+    "@Retry",
+    "@Timeout",
+    "@Batch",
+    "@Delegated",
+    "@Ignore",
+    "InfiniticClientConfig",
+    "InfiniticWorkerConfig",
+    "TransportConfig",
+    "StorageConfig"
+  ]
+}
