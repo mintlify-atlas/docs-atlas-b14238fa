@@ -1,80 +1,267 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get started with Infinitic in minutes by building your first workflow
 ---
 
-## Get started in three steps
+This guide will walk you through creating your first Infinitic workflow. You'll learn how to define services, orchestrate them with workflows, and run everything locally.
 
-Get your documentation site running locally and make your first customization.
+## What You'll Build
 
-### Step 1: Set up your local environment
+You'll create a simple notification workflow that:
+- Sends an email notification
+- Waits for confirmation
+- Logs the result
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+This demonstrates Infinitic's core capabilities: service execution, workflow orchestration, and state management.
+
+<Steps>
+
+<Step title="Add Infinitic Dependencies">
+
+Add the Infinitic dependencies to your project:
+
+<CodeGroup>
+
+```kotlin build.gradle.kts
+dependencies {
+    implementation("io.infinitic:infinitic-worker:0.18.2")
+    implementation("io.infinitic:infinitic-client:0.18.2")
+    implementation("io.infinitic:infinitic-transport-pulsar:0.18.2")
+    implementation("io.infinitic:infinitic-storage:0.18.2")
+}
+```
+
+```groovy build.gradle
+dependencies {
+    implementation 'io.infinitic:infinitic-worker:0.18.2'
+    implementation 'io.infinitic:infinitic-client:0.18.2'
+    implementation 'io.infinitic:infinitic-transport-pulsar:0.18.2'
+    implementation 'io.infinitic:infinitic-storage:0.18.2'
+}
+```
+
+```xml pom.xml
+<dependencies>
+    <dependency>
+        <groupId>io.infinitic</groupId>
+        <artifactId>infinitic-worker</artifactId>
+        <version>0.18.2</version>
+    </dependency>
+    <dependency>
+        <groupId>io.infinitic</groupId>
+        <artifactId>infinitic-client</artifactId>
+        <version>0.18.2</version>
+    </dependency>
+    <dependency>
+        <groupId>io.infinitic</groupId>
+        <artifactId>infinitic-transport-pulsar</artifactId>
+        <version>0.18.2</version>
+    </dependency>
+    <dependency>
+        <groupId>io.infinitic</groupId>
+        <artifactId>infinitic-storage</artifactId>
+        <version>0.18.2</version>
+    </dependency>
+</dependencies>
+```
+
+</CodeGroup>
+
+</Step>
+
+<Step title="Define Your Service">
+
+Create a service interface and implementation. Services contain the actual business logic.
+
+```kotlin NotificationService.kt
+interface NotificationService {
+    fun sendEmail(email: String, message: String): String
+}
+
+class NotificationServiceImpl : NotificationService {
+    override fun sendEmail(email: String, message: String): String {
+        // Simulate sending email
+        println("Sending email to $email: $message")
+        Thread.sleep(100)
+        return "Email sent successfully to $email"
+    }
+}
+```
+
+<Note>
+Services are where you implement your actual business logic - API calls, database operations, external service integrations, etc. Infinitic handles execution, retries, and error handling.
+</Note>
+
+</Step>
+
+<Step title="Create a Workflow">
+
+Define a workflow interface and implementation. Workflows orchestrate services and define your business process.
+
+```kotlin NotificationWorkflow.kt
+import io.infinitic.workflows.Workflow
+
+interface NotificationWorkflow {
+    fun process(email: String, message: String): String
+}
+
+class NotificationWorkflowImpl : Workflow(), NotificationWorkflow {
+    // Create a stub for the service
+    private val notificationService = newService(NotificationService::class.java)
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    override fun process(email: String, message: String): String {
+        // Execute the service
+        val result = notificationService.sendEmail(email, message)
+        
+        // Return the result
+        return result
+    }
+}
+```
+
+<Note>
+Workflows define the orchestration logic. They are deterministic and can be replayed, which means they shouldn't contain any non-deterministic operations like `Random()` or direct API calls. Use services for those operations instead.
+</Note>
+
+</Step>
+
+<Step title="Configure Infinitic">
+
+Create a configuration file for your worker and client. This example uses in-memory transport for quick local development.
+
+```yaml infinitic.yml
+# Storage configuration (in-memory for development)
+storage:
+  inMemory:
+
+# Transport configuration (Pulsar)
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://localhost:6650
+    webServiceUrl: http://localhost:8080
+    tenant: infinitic
+    namespace: dev
+
+# Service configuration
+services:
+  - name: NotificationService
+    executor:
+      class: com.example.NotificationServiceImpl
+      concurrency: 10
+
+# Workflow configuration  
+workflows:
+  - name: NotificationWorkflow
+    executor:
+      class: com.example.NotificationWorkflowImpl
+      concurrency: 10
+```
+
+<Warning>
+For production use, replace in-memory storage with Redis, PostgreSQL, or MySQL. See the [Installation](/installation) guide for details.
+</Warning>
+
+</Step>
+
+<Step title="Start a Worker">
+
+Workers execute your services and workflows. Create a worker application:
+
+```kotlin Worker.kt
+import io.infinitic.workers.InfiniticWorker
+
+fun main() {
+    // Create worker from configuration file
+    val worker = InfiniticWorker.fromYamlFile("infinitic.yml")
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    // Start the worker (blocks until shutdown)
+    worker.start()
+}
+```
 
-### Step 2: Deploy your changes
+Run your worker:
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+```bash
+# Make sure Pulsar is running first
+docker run -d -p 6650:6650 -p 8080:8080 apachepulsar/pulsar:latest bin/pulsar standalone
+
+# Run your worker
+./gradlew run
+```
+
+<Note>
+Workers are long-running processes that consume messages from Pulsar, execute tasks, and produce responses. You can run multiple workers for horizontal scaling.
+</Note>
+
+</Step>
+
+<Step title="Execute Your Workflow">
+
+Create a client to start workflows:
+
+```kotlin Client.kt
+import io.infinitic.clients.InfiniticClient
+
+fun main() {
+    // Create client from configuration
+    val client = InfiniticClient.fromYamlFile("infinitic.yml")
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    // Create a workflow stub
+    val workflow = client.newWorkflow(NotificationWorkflow::class.java)
+    
+    // Start the workflow and wait for result
+    val result = workflow.process(
+        email = "user@example.com",
+        message = "Hello from Infinitic!"
+    )
+    
+    println("Result: $result")
+    
+    // Close the client
+    client.close()
+}
+```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+Run your client:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+```bash
+./gradlew run --args="client"
+```
 
-### Step 3: Go live
+</Step>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+</Steps>
 
-## Next steps
+## What's Happening?
 
-Now that you have your docs running, explore these key features:
+When you execute the workflow:
+
+1. The **client** sends a message to start the workflow
+2. A **workflow worker** picks up the message and begins executing `NotificationWorkflowImpl.process()`
+3. When the workflow calls `notificationService.sendEmail()`, it dispatches a service task
+4. A **service worker** executes `NotificationServiceImpl.sendEmail()`
+5. The result flows back to the workflow, which completes and returns to the client
+
+All state is persisted automatically, so workflows survive crashes and can run for days, weeks, or months.
+
+## Next Steps
 
 <CardGroup cols={2}>
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
+<Card title="Learn Core Concepts" icon="book" href="/concepts/workflows">
+Understand workflows, services, and how Infinitic works
 </Card>
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
+<Card title="Production Setup" icon="server" href="/installation">
+Set up Infinitic with production-ready storage and transport
 </Card>
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
+<Card title="Advanced Features" icon="wand-magic-sparkles" href="/features/retries">
+Explore retries, timeouts, versioning, and more
 </Card>
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
+<Card title="Examples" icon="code" href="/examples">
+Browse real-world examples and patterns
 </Card>
 
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

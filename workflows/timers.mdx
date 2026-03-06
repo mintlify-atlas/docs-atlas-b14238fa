@@ -1,0 +1,526 @@
+---
+title: Timers
+description: Add delays, timeouts, and scheduled execution to workflows using timers
+---
+
+Timers allow workflows to wait for a specific duration or until a specific time. They're essential for implementing delays, timeouts, scheduling, and time-based workflow logic.
+
+## Timer Types
+
+Infinitic provides two types of timers:
+
+<CardGroup cols={2}>
+  <Card title="Duration Timers" icon="clock">
+    Wait for a relative duration (e.g., 30 seconds, 5 minutes)
+  </Card>
+  <Card title="Instant Timers" icon="calendar">
+    Wait until a specific point in time
+  </Card>
+</CardGroup>
+
+## Duration Timers
+
+Create a timer that completes after a specified duration:
+
+```kotlin
+import io.infinitic.workflows.Workflow
+import java.time.Duration
+import java.time.Instant
+
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  private val service = newService(MyService::class.java)
+  
+  override fun processWithDelay() {
+    // Wait for 30 seconds
+    timer(Duration.ofSeconds(30)).await()
+    
+    // Continue processing
+    service.doWork()
+  }
+}
+```
+
+### Duration Examples
+
+<CodeGroup>
+```kotlin Seconds
+timer(Duration.ofSeconds(30)).await()
+```
+
+```kotlin Minutes
+timer(Duration.ofMinutes(5)).await()
+```
+
+```kotlin Hours
+timer(Duration.ofHours(2)).await()
+```
+
+```kotlin Days
+timer(Duration.ofDays(1)).await()
+```
+
+```kotlin Mixed
+timer(Duration.ofHours(1).plusMinutes(30)).await()
+```
+</CodeGroup>
+
+## Instant Timers
+
+Create a timer that completes at a specific point in time:
+
+```kotlin
+import java.time.Instant
+import java.time.temporal.ChronoUnit
+
+class ScheduledWorkflow : Workflow(), ScheduledWorkflowInterface {
+  override fun scheduleTask(scheduledTime: Instant) {
+    // Wait until the scheduled time
+    timer(scheduledTime).await()
+    
+    // Execute at the scheduled time
+    service.executeScheduledTask()
+  }
+  
+  override fun scheduleForTomorrow() {
+    // Schedule for 24 hours from now
+    val tomorrow = Instant.now().plus(1, ChronoUnit.DAYS)
+    timer(tomorrow).await()
+    
+    service.executeDailyTask()
+  }
+}
+```
+
+## Timer with Deferred
+
+Timers return a `Deferred<Instant>` that can be used with other deferred operations:
+
+```kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  override fun processWithTimer(): Instant {
+    val timerDeferred = timer(Duration.ofSeconds(10))
+    
+    // Do other work...
+    
+    // Wait for timer and get the completion time
+    val completionTime = timerDeferred.await()
+    return completionTime
+  }
+}
+```
+
+## Racing Timers with Other Operations
+
+Use `or()` to implement timeouts by racing a timer against other operations:
+
+### Timeout for Service Calls
+
+```kotlin
+import io.infinitic.workflows.or
+import java.time.Duration
+
+class TimeoutWorkflow : Workflow(), TimeoutWorkflowInterface {
+  private val externalService = newService(ExternalService::class.java)
+  
+  override fun callWithTimeout(request: String): String {
+    val serviceCall = dispatch(externalService::process, request)
+    val timeout = timer(Duration.ofSeconds(30))
+    
+    return when (val result = (serviceCall or timeout).await()) {
+      is String -> result  // Service completed first
+      else -> throw TimeoutException("Service call timed out after 30 seconds")
+    }
+  }
+}
+```
+
+### Timeout for Channel Signals
+
+```kotlin
+import io.infinitic.workflows.SendChannel
+
+class ApprovalWorkflow : Workflow(), ApprovalWorkflowInterface {
+  override val approvalChannel = channel<Boolean>()
+  
+  override fun waitForApproval(): String {
+    val signalDeferred = approvalChannel.receive()
+    val timeout = timer(Duration.ofHours(24))
+    
+    return when (val result = (signalDeferred or timeout).await()) {
+      is Boolean -> if (result) "Approved" else "Rejected"
+      else -> "Timeout - no response within 24 hours"
+    }
+  }
+}
+```
+
+### Timeout for Sub-workflows
+
+```kotlin
+class ParentWorkflow : Workflow(), ParentWorkflowInterface {
+  private val childWorkflow = newWorkflow(ChildWorkflow::class.java)
+  
+  override fun executeWithTimeout(): String {
+    val workflowCall = dispatch(childWorkflow::process)
+    val timeout = timer(Duration.ofMinutes(5))
+    
+    return when ((workflowCall or timeout).await()) {
+      is String -> workflowCall.await()
+      else -> "Child workflow timed out"
+    }
+  }
+}
+```
+
+## Multiple Timers
+
+### Sequential Delays
+
+```kotlin
+class RetryWorkflow : Workflow(), RetryWorkflowInterface {
+  private val service = newService(UnreliableService::class.java)
+  
+  override fun retryWithBackoff(data: String): String {
+    var delay = 1L
+    repeat(5) { attempt ->
+      try {
+        return service.process(data)
+      } catch (e: Exception) {
+        if (attempt < 4) {
+          // Exponential backoff
+          timer(Duration.ofSeconds(delay)).await()
+          delay *= 2
+        } else {
+          throw e  // Final attempt failed
+        }
+      }
+    }
+    throw IllegalStateException("Should not reach here")
+  }
+}
+```
+
+### Parallel Timers
+
+```kotlin
+import io.infinitic.workflows.and
+
+class MultipleTimersWorkflow : Workflow(), MultipleTimersWorkflowInterface {
+  override fun waitForMultiple() {
+    val timer1 = timer(Duration.ofSeconds(10))
+    val timer2 = timer(Duration.ofSeconds(20))
+    val timer3 = timer(Duration.ofSeconds(30))
+    
+    // Wait for all timers to complete
+    (timer1 and timer2 and timer3).await()
+    
+    // All timers completed
+    service.processAfterAllTimers()
+  }
+}
+```
+
+### Racing Multiple Timers
+
+```kotlin
+import io.infinitic.workflows.or
+
+class RacingTimersWorkflow : Workflow(), RacingTimersWorkflowInterface {
+  override fun waitForFirst() {
+    val shortTimer = timer(Duration.ofSeconds(5))
+    val longTimer = timer(Duration.ofSeconds(30))
+    
+    // Wait for the first timer to complete
+    (shortTimer or longTimer).await()
+    
+    // Short timer completed first
+    service.processAfterFirstTimer()
+  }
+}
+```
+
+## Periodic Execution
+
+Implement periodic tasks using timers and recursion:
+
+```kotlin
+class PeriodicWorkflow : Workflow(), PeriodicWorkflowInterface {
+  private val monitoringService = newService(MonitoringService::class.java)
+  private val periodicWorkflow = newWorkflow(PeriodicWorkflow::class.java)
+  
+  override fun monitorEvery5Minutes(iterations: Int) {
+    if (iterations <= 0) return
+    
+    // Execute monitoring task
+    monitoringService.checkHealth()
+    
+    // Wait 5 minutes
+    timer(Duration.ofMinutes(5)).await()
+    
+    // Continue with next iteration
+    periodicWorkflow.monitorEvery5Minutes(iterations - 1)
+  }
+}
+```
+
+## Scheduled Workflows
+
+Schedule workflow execution for specific times:
+
+```kotlin
+import java.time.Instant
+import java.time.ZonedDateTime
+import java.time.ZoneId
+
+class ScheduledWorkflow : Workflow(), ScheduledWorkflowInterface {
+  private val reportService = newService(ReportService::class.java)
+  
+  override fun generateDailyReport(targetHour: Int) {
+    // Calculate next execution time (e.g., 9 AM tomorrow)
+    val now = ZonedDateTime.now(ZoneId.of("America/New_York"))
+    val next = now.plusDays(1)
+        .withHour(targetHour)
+        .withMinute(0)
+        .withSecond(0)
+    
+    // Wait until target time
+    timer(next.toInstant()).await()
+    
+    // Generate report
+    reportService.generateDailyReport()
+  }
+  
+  override fun scheduleWeeklyTask() {
+    // Schedule for next Monday at 8 AM
+    val now = ZonedDateTime.now(ZoneId.of("UTC"))
+    val nextMonday = now.plusWeeks(1)
+        .with(java.time.DayOfWeek.MONDAY)
+        .withHour(8)
+        .withMinute(0)
+    
+    timer(nextMonday.toInstant()).await()
+    
+    service.executeWeeklyMaintenance()
+  }
+}
+```
+
+## Manual Timer Completion
+
+Timers can be manually completed from outside the workflow (useful for testing or administrative control):
+
+```kotlin
+// From client code
+val workflow = client.getWorkflowById(
+  MyWorkflow::class.java,
+  workflowId
+)
+
+// Complete all timers in the workflow
+client.completeTimers(workflow)
+
+// Complete timers for a specific method run
+client.completeTimers(workflow, methodRunId)
+```
+
+## Timer Precision
+
+<Info>
+  **Timer Resolution**
+  
+  Timer precision depends on your configuration:
+  - Default tick duration is typically 1 second
+  - Short timers (< 1 second) may complete sooner than expected
+  - Long timers are more precise as the overhead becomes negligible
+  
+  For sub-second precision, adjust the tick duration in your worker configuration.
+</Info>
+
+## Complete Example: Order with Timeout and Retry
+
+```kotlin
+import io.infinitic.workflows.Workflow
+import io.infinitic.workflows.SendChannel
+import io.infinitic.workflows.or
+import java.time.Duration
+
+interface OrderWorkflow {
+  val approvalChannel: SendChannel<Boolean>
+  fun processOrder(orderId: String, amount: Double): OrderResult
+}
+
+class OrderWorkflowImpl : Workflow(), OrderWorkflow {
+  override val approvalChannel = channel<Boolean>()
+  
+  private val paymentService = newService(PaymentService::class.java)
+  private val notificationService = newService(NotificationService::class.java)
+  
+  override fun processOrder(orderId: String, amount: Double): OrderResult {
+    // Request approval
+    notificationService.requestApproval(orderId)
+    
+    // Wait for approval with 1-hour timeout
+    val approvalDeferred = approvalChannel.receive()
+    val timeout = timer(Duration.ofHours(1))
+    
+    val approved = when (val result = (approvalDeferred or timeout).await()) {
+      is Boolean -> result
+      else -> {
+        notificationService.sendTimeout(orderId)
+        return OrderResult.timeout(orderId)
+      }
+    }
+    
+    if (!approved) {
+      return OrderResult.rejected(orderId)
+    }
+    
+    // Try payment with retry and exponential backoff
+    var delay = 1L
+    repeat(3) { attempt ->
+      try {
+        val payment = paymentService.charge(orderId, amount)
+        return OrderResult.success(orderId, payment)
+      } catch (e: TransientException) {
+        if (attempt < 2) {
+          timer(Duration.ofSeconds(delay)).await()
+          delay *= 2
+        }
+      }
+    }
+    
+    return OrderResult.failed(orderId, "Payment failed after retries")
+  }
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always use timers for delays">
+    Never use `Thread.sleep()` or similar blocking operations:
+    
+    ```kotlin
+    // ❌ Wrong - breaks determinism
+    Thread.sleep(5000)
+    
+    // ✅ Correct - use timer
+    timer(Duration.ofSeconds(5)).await()
+    ```
+  </Accordion>
+  
+  <Accordion title="Add timeouts to external operations">
+    Always add timeouts when waiting for external events:
+    
+    ```kotlin
+    // ✅ Good - with timeout
+    val result = (channel.receive() or timer(Duration.ofMinutes(5))).await()
+    
+    // ❌ Bad - could wait forever
+    val result = channel.receive().await()
+    ```
+  </Accordion>
+  
+  <Accordion title="Use appropriate timeout durations">
+    Choose timeout durations based on expected operation time:
+    
+    ```kotlin
+    // Fast API call
+    val result = (apiCall or timer(Duration.ofSeconds(30))).await()
+    
+    // Long-running batch process
+    val result = (batchJob or timer(Duration.ofHours(2))).await()
+    
+    // Human approval
+    val result = (approval or timer(Duration.ofDays(1))).await()
+    ```
+  </Accordion>
+  
+  <Accordion title="Handle timeout results explicitly">
+    Always check what completed when using `or()`:
+    
+    ```kotlin
+    when (val result = (operation or timeout).await()) {
+      is ExpectedType -> handleSuccess(result)
+      is Instant -> handleTimeout()
+      else -> handleUnexpectedType()
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### Retry with Exponential Backoff
+
+```kotlin
+fun <T> retryWithBackoff(
+  maxAttempts: Int,
+  initialDelay: Duration,
+  block: () -> T
+): T {
+  var delay = initialDelay
+  repeat(maxAttempts) { attempt ->
+    try {
+      return block()
+    } catch (e: Exception) {
+      if (attempt < maxAttempts - 1) {
+        timer(delay).await()
+        delay = delay.multipliedBy(2)
+      } else {
+        throw e
+      }
+    }
+  }
+  throw IllegalStateException("Should not reach here")
+}
+```
+
+### Polling with Timeout
+
+```kotlin
+fun pollUntilReady(maxDuration: Duration) {
+  val deadline = timer(maxDuration)
+  
+  while (true) {
+    val status = service.checkStatus()
+    if (status == Status.READY) return
+    
+    val poll = timer(Duration.ofSeconds(5))
+    when ((poll or deadline).await()) {
+      is Instant -> if (deadline.isCompleted()) {
+        throw TimeoutException("Status never became ready")
+      }
+    }
+  }
+}
+```
+
+### Rate Limiting
+
+```kotlin
+fun processWithRateLimit(items: List<String>) {
+  items.forEach { item ->
+    service.process(item)
+    // Wait 100ms between items
+    timer(Duration.ofMillis(100)).await()
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Channels" icon="tower-broadcast" href="/workflows/channels">
+    Learn about receiving external signals
+  </Card>
+  <Card title="Sub-workflows" icon="sitemap" href="/workflows/sub-workflows">
+    Compose workflows from other workflows
+  </Card>
+  <Card title="Versioning" icon="code-branch" href="/workflows/versioning">
+    Update workflows while maintaining compatibility
+  </Card>
+  <Card title="Workflow Methods" icon="function" href="/workflows/workflow-methods">
+    Complete workflow method reference
+  </Card>
+</CardGroup>

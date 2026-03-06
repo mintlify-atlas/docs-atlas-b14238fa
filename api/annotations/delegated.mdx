@@ -1,0 +1,418 @@
+---
+title: "@Delegated"
+description: Mark tasks as delegated to external systems
+---
+
+The `@Delegated` annotation indicates that a task's completion will be handled by an external system rather than by the task method's return value.
+
+## Package
+
+```kotlin
+io.infinitic.annotations.Delegated
+```
+
+## Targets
+
+- Methods (service methods only)
+
+## Overview
+
+Delegated tasks are useful when:
+- An external system will complete the task asynchronously
+- Human approval or intervention is required
+- Long-running processes are managed by external services
+- Task completion depends on external events
+
+## Usage
+
+### Basic Delegated Task
+
+```kotlin
+import io.infinitic.annotations.Delegated
+import io.infinitic.tasks.Task
+
+interface ApprovalService {
+  @Delegated
+  fun requestApproval(documentId: String, approverId: String): ApprovalResult
+}
+
+class ApprovalServiceImpl : ApprovalService {
+  override fun requestApproval(
+    documentId: String,
+    approverId: String
+  ): ApprovalResult {
+    // Get task identifiers for external system
+    val serviceName = Task.serviceName
+    val taskId = Task.taskId
+    
+    // Send approval request to external system
+    externalApprovalSystem.createApprovalRequest(
+      documentId = documentId,
+      approverId = approverId,
+      callbackServiceName = serviceName,
+      callbackTaskId = taskId
+    )
+    
+    // Return value is ignored for delegated tasks
+    return ApprovalResult.pending()
+  }
+}
+```
+
+## Completing Delegated Tasks
+
+The external system must complete the task using the `InfiniticClient`:
+
+```kotlin
+import io.infinitic.clients.InfiniticClient
+
+// In external approval system
+class ApprovalHandler(
+  val client: InfiniticClient
+) {
+  fun handleApprovalDecision(
+    serviceName: String,
+    taskId: String,
+    approved: Boolean
+  ) {
+    val result = ApprovalResult(
+      approved = approved,
+      timestamp = Instant.now()
+    )
+    
+    // Complete the delegated task
+    client.completeDelegatedTaskAsync(
+      serviceName = serviceName,
+      taskId = taskId,
+      result = result
+    ).join()
+  }
+}
+```
+
+## Task Properties
+
+Within a delegated task, you can access:
+
+<ParamField path="Task.serviceName" type="String">
+  The name of the service (needed for completion)
+</ParamField>
+
+<ParamField path="Task.taskId" type="String">
+  The unique task identifier (needed for completion)
+</ParamField>
+
+<ParamField path="Task.meta" type="Map<String, ByteArray>">
+  Task metadata (optional, for context)
+</ParamField>
+
+<ParamField path="Task.tags" type="Set<String>">
+  Task tags (optional, for context)
+</ParamField>
+
+## Workflow Integration
+
+```kotlin
+import io.infinitic.workflows.Workflow
+import java.time.Duration
+
+class DocumentWorkflowImpl : Workflow(), DocumentWorkflow {
+  override fun processDocument(documentId: String): ProcessingResult {
+    val approvalService = newService(ApprovalService::class.java)
+    
+    // Request approval (delegated)
+    val approvalDeferred = dispatch(
+      approvalService::requestApproval,
+      documentId,
+      "manager@example.com"
+    )
+    
+    // Set a timeout for approval
+    val timeout = timer(Duration.ofDays(7))
+    
+    // Wait for approval or timeout
+    val firstCompleted = (approvalDeferred or timeout).await()
+    
+    return when {
+      approvalDeferred.isCompleted() -> {
+        val approval = approvalDeferred.await()
+        if (approval.approved) {
+          ProcessingResult.approved()
+        } else {
+          ProcessingResult.rejected()
+        }
+      }
+      else -> ProcessingResult.timeout()
+    }
+  }
+}
+```
+
+## Use Cases
+
+### Human Approval
+
+```kotlin
+@Delegated
+fun requestManagerApproval(
+  requestId: String,
+  managerId: String,
+  amount: Double
+): ApprovalDecision
+```
+
+External approval UI completes the task when manager makes a decision.
+
+### External API Callbacks
+
+```kotlin
+@Delegated
+fun initiatePayment(
+  amount: Double,
+  account: String
+): PaymentResult
+```
+
+Payment gateway calls webhook to complete the task when payment is processed.
+
+### Manual Operations
+
+```kotlin
+@Delegated
+fun performManualDataEntry(
+  formId: String,
+  assignee: String
+): FormData
+```
+
+Operator completes the task through an admin interface after entering data.
+
+### Long-Running External Processes
+
+```kotlin
+@Delegated
+fun startVideoEncoding(
+  videoId: String,
+  format: String
+): EncodingResult
+```
+
+Video encoding service completes the task when processing finishes.
+
+## Complete Example
+
+```kotlin
+import io.infinitic.annotations.Delegated
+import io.infinitic.annotations.Timeout
+import io.infinitic.tasks.Task
+import io.infinitic.tasks.WithTimeout
+
+// Timeout for delegated task initialization (not the full duration)
+class DelegatedTaskTimeout : WithTimeout {
+  override fun getTimeoutSeconds() = 30.0 // 30 seconds to send request
+}
+
+interface ReviewService {
+  @Delegated
+  @Timeout(with = DelegatedTaskTimeout::class)
+  fun requestCodeReview(
+    pullRequestId: String,
+    reviewer: String
+  ): ReviewResult
+}
+
+class ReviewServiceImpl(
+  val reviewSystem: ExternalReviewSystem,
+  val database: Database
+) : ReviewService {
+  override fun requestCodeReview(
+    pullRequestId: String,
+    reviewer: String
+  ): ReviewResult {
+    // Get task identifiers
+    val serviceName = Task.serviceName
+    val taskId = Task.taskId
+    
+    // Store task info for later completion
+    database.storePendingReview(
+      pullRequestId = pullRequestId,
+      taskId = taskId,
+      serviceName = serviceName,
+      reviewer = reviewer,
+      createdAt = Instant.now()
+    )
+    
+    // Send review request to external system
+    reviewSystem.requestReview(
+      pullRequestId = pullRequestId,
+      reviewer = reviewer,
+      callbackUrl = "https://api.example.com/reviews/complete/$taskId"
+    )
+    
+    logger.info("Review requested: PR=$pullRequestId, taskId=$taskId")
+    
+    // Return value is ignored
+    return ReviewResult.pending()
+  }
+}
+
+// External system's callback handler
+class ReviewCallbackHandler(
+  val client: InfiniticClient,
+  val database: Database
+) {
+  @PostMapping("/reviews/complete/{taskId}")
+  fun completeReview(
+    @PathVariable taskId: String,
+    @RequestBody review: ReviewData
+  ): ResponseEntity<String> {
+    try {
+      // Retrieve task info
+      val pendingReview = database.getPendingReview(taskId)
+        ?: return ResponseEntity.notFound().build()
+      
+      // Create result
+      val result = ReviewResult(
+        approved = review.approved,
+        comments = review.comments,
+        reviewedBy = review.reviewer,
+        reviewedAt = Instant.now()
+      )
+      
+      // Complete the delegated task
+      client.completeDelegatedTaskAsync(
+        serviceName = pendingReview.serviceName,
+        taskId = taskId,
+        result = result
+      ).join()
+      
+      // Mark as completed in database
+      database.markReviewCompleted(taskId)
+      
+      logger.info("Review completed: taskId=$taskId, approved=${review.approved}")
+      
+      return ResponseEntity.ok("Review completed")
+    } catch (e: Exception) {
+      logger.error("Failed to complete review: ${e.message}", e)
+      return ResponseEntity.status(500).body("Error: ${e.message}")
+    }
+  }
+}
+
+// Workflow using delegated review
+class CIWorkflowImpl : Workflow(), CIWorkflow {
+  override fun deployWithReview(
+    pullRequestId: String,
+    environment: String
+  ): DeploymentResult {
+    val reviewService = newService(ReviewService::class.java)
+    val deployService = newService(DeploymentService::class.java)
+    
+    // Request code review (delegated)
+    val reviewDeferred = dispatch(
+      reviewService::requestCodeReview,
+      pullRequestId,
+      "senior-engineer@example.com"
+    )
+    
+    // Wait up to 2 days for review
+    val timeout = timer(Duration.ofDays(2))
+    val first = (reviewDeferred or timeout).await()
+    
+    return when {
+      reviewDeferred.isCompleted() -> {
+        val review = reviewDeferred.await()
+        if (review.approved) {
+          // Deploy if approved
+          dispatch(deployService::deploy, pullRequestId, environment).await()
+        } else {
+          DeploymentResult.rejected(review.comments)
+        }
+      }
+      else -> DeploymentResult.timeout("Review not completed in time")
+    }
+  }
+}
+```
+
+## Error Handling
+
+### Task Initialization Failure
+
+If the task method throws an exception, the task fails normally:
+
+```kotlin
+override fun requestApproval(
+  documentId: String,
+  approverId: String
+): ApprovalResult {
+  try {
+    val serviceName = Task.serviceName
+    val taskId = Task.taskId
+    
+    externalSystem.createRequest(documentId, approverId, taskId)
+    return ApprovalResult.pending()
+  } catch (e: Exception) {
+    // Task will be retried according to retry policy
+    throw ApprovalRequestException("Failed to create approval request", e)
+  }
+}
+```
+
+### Completion Failure
+
+If completing the task fails:
+
+```kotlin
+try {
+  client.completeDelegatedTaskAsync(
+    serviceName = serviceName,
+    taskId = taskId,
+    result = result
+  ).join()
+} catch (e: Exception) {
+  // Log and potentially retry
+  logger.error("Failed to complete task: ${e.message}")
+  // Store for manual completion or retry
+  failedCompletions.add(CompletionRetry(serviceName, taskId, result))
+}
+```
+
+## Best Practices
+
+1. **Store task metadata**: Save serviceName and taskId for reliable completion
+2. **Implement idempotent completion**: Handle duplicate completion attempts gracefully
+3. **Add timeouts in workflows**: Don't wait indefinitely for delegated tasks
+4. **Monitor pending tasks**: Track tasks waiting for external completion
+5. **Provide manual completion**: Allow admins to complete stuck tasks
+6. **Validate completion data**: Ensure result matches expected type
+7. **Log delegation points**: Track when tasks are delegated and completed
+8. **Handle expiration**: Clean up abandoned delegation records
+
+## Monitoring
+
+```kotlin
+class DelegatedTaskMonitor(
+  val database: Database,
+  val alerting: AlertingService
+) {
+  @Scheduled(fixedRate = 3600000) // Every hour
+  fun checkStaleTasks() {
+    val staleThreshold = Instant.now().minus(24, ChronoUnit.HOURS)
+    val staleTasks = database.getPendingReviewsBefore(staleThreshold)
+    
+    if (staleTasks.isNotEmpty()) {
+      alerting.sendAlert(
+        "Found ${staleTasks.size} delegated tasks older than 24 hours",
+        staleTasks
+      )
+    }
+  }
+}
+```
+
+## See Also
+
+- [InfiniticClient](/api/infinitic-client) - For completing delegated tasks
+- [Timeout Annotation](/api/annotations/timeout) - For task timeouts
+- [Workflow](/api/workflow) - For using delegated tasks in workflows

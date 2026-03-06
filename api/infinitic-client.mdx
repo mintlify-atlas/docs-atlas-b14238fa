@@ -1,0 +1,344 @@
+---
+title: InfiniticClient
+description: Client for interacting with Infinitic workflows and tasks
+---
+
+The `InfiniticClient` class is the main entry point for interacting with Infinitic from your application. It allows you to start workflows, retrieve workflow instances, manage workflow execution, and complete delegated tasks.
+
+## Package
+
+```kotlin
+io.infinitic.clients.InfiniticClient
+```
+
+## Constructor
+
+<ParamField path="config" type="InfiniticClientConfigInterface" required>
+  The client configuration including transport settings
+</ParamField>
+
+## Creation Methods
+
+The `InfiniticClient` provides several static factory methods for creating instances:
+
+### From Builder
+
+```kotlin
+val client = InfiniticClient.builder()
+  .setTransport(transportConfig)
+  .setName("my-client")
+  .build()
+```
+
+### From YAML
+
+<ParamField path="fromYamlResource" type="InfiniticClient">
+  Creates a client from YAML files in the resources directory
+  
+  **Parameters:**
+  - `resources: String...` - Resource paths
+  
+  **Example:**
+  ```kotlin
+  val client = InfiniticClient.fromYamlResource(
+    "infinitic.yml"
+  )
+  ```
+</ParamField>
+
+<ParamField path="fromYamlFile" type="InfiniticClient">
+  Creates a client from YAML files in the file system
+  
+  **Parameters:**
+  - `files: String...` - File paths
+  
+  **Example:**
+  ```kotlin
+  val client = InfiniticClient.fromYamlFile(
+    "/etc/infinitic/client.yml"
+  )
+  ```
+</ParamField>
+
+<ParamField path="fromYamlString" type="InfiniticClient">
+  Creates a client from YAML strings
+  
+  **Parameters:**
+  - `yamls: String...` - YAML content strings
+</ParamField>
+
+## Instance Methods
+
+### Workflow Management
+
+<ParamField path="newWorkflow" type="<T> T">
+  Creates a stub for starting a new workflow instance
+  
+  **Parameters:**
+  - `klass: Class<out T>` - The workflow interface class
+  - `tags: Set<String>?` - Optional tags for the workflow (default: null)
+  - `meta: Map<String, ByteArray>?` - Optional metadata (default: null)
+  
+  **Returns:** A proxy stub for the workflow
+  
+  **Example:**
+  ```kotlin
+  val workflow = client.newWorkflow(
+    BookingWorkflow::class.java,
+    tags = setOf("high-priority"),
+    meta = mapOf("region" to "us-east".toByteArray())
+  )
+  ```
+</ParamField>
+
+<ParamField path="getWorkflowById" type="<T> T">
+  Gets a stub for an existing workflow by ID
+  
+  **Parameters:**
+  - `klass: Class<out T>` - The workflow interface class
+  - `id: String` - The workflow instance ID
+  
+  **Returns:** A proxy stub for the existing workflow
+  
+  **Example:**
+  ```kotlin
+  val workflow = client.getWorkflowById(
+    BookingWorkflow::class.java,
+    "550e8400-e29b-41d4-a716-446655440000"
+  )
+  ```
+</ParamField>
+
+<ParamField path="getWorkflowByTag" type="<T> T">
+  Gets a stub for existing workflows by tag
+  
+  **Parameters:**
+  - `klass: Class<out T>` - The workflow interface class
+  - `tag: String` - The workflow tag
+  
+  **Returns:** A proxy stub targeting workflows with the given tag
+  
+  **Example:**
+  ```kotlin
+  val workflow = client.getWorkflowByTag(
+    BookingWorkflow::class.java,
+    "booking-12345"
+  )
+  ```
+</ParamField>
+
+### Starting Workflows
+
+<ParamField path="startAsync" type="<R> CompletableFuture<Deferred<R>>">
+  Starts a workflow method asynchronously
+  
+  **Parameters:**
+  - `invoke: () -> R` - Lambda invoking the workflow method
+  
+  **Returns:** A CompletableFuture containing a Deferred for the result
+  
+  **Example:**
+  ```kotlin
+  val workflow = client.newWorkflow(BookingWorkflow::class.java)
+  val future = client.startAsync { workflow.processBooking("booking-123") }
+  val deferred = future.join()
+  val result = deferred.await()
+  ```
+</ParamField>
+
+<ParamField path="startVoidAsync" type="CompletableFuture<Deferred<Void>>">
+  Starts a void workflow method asynchronously
+  
+  **Parameters:**
+  - `invoke: () -> Unit` - Lambda invoking the workflow method
+  
+  **Returns:** A CompletableFuture containing a `Deferred<Void>`
+</ParamField>
+
+### Workflow Control
+
+<ParamField path="cancelAsync" type="CompletableFuture<Unit>">
+  Cancels a running workflow
+  
+  **Parameters:**
+  - `stub: Any` - The workflow stub (must be from getWorkflowById or getWorkflowByTag)
+  
+  **Returns:** A CompletableFuture that completes when the cancellation is processed
+  
+  **Example:**
+  ```kotlin
+  val workflow = client.getWorkflowById(
+    BookingWorkflow::class.java,
+    workflowId
+  )
+  client.cancelAsync(workflow).join()
+  ```
+</ParamField>
+
+<ParamField path="retryWorkflowTaskAsync" type="CompletableFuture<Unit>">
+  Retries the current workflow task
+  
+  **Parameters:**
+  - `stub: Any` - The workflow stub
+  
+  **Returns:** A CompletableFuture that completes when retry is scheduled
+</ParamField>
+
+<ParamField path="retryTasksAsync" type="CompletableFuture<Unit>">
+  Retries tasks within a workflow
+  
+  **Overloads:**
+  - `retryTasksAsync(stub: Any, taskId: String)` - Retry specific task by ID
+  - `retryTasksAsync(stub: Any, taskStatus: DeferredStatus?, taskClass: Class<*>?)` - Retry tasks by status and/or class
+  
+  **Parameters:**
+  - `stub: Any` - The workflow stub
+  - `taskId: String` - The task ID to retry
+  - `taskStatus: DeferredStatus?` - Filter by task status (FAILED, CANCELED, etc.)
+  - `taskClass: Class<*>?` - Filter by task class
+  
+  **Example:**
+  ```kotlin
+  // Retry all failed payment tasks
+  client.retryTasksAsync(
+    workflow,
+    DeferredStatus.FAILED,
+    PaymentService::class.java
+  ).join()
+  ```
+</ParamField>
+
+<ParamField path="completeTimersAsync" type="CompletableFuture<Unit>">
+  Manually completes timers within a workflow
+  
+  **Parameters:**
+  - `stub: Any` - The workflow stub
+  - `id: String?` - Optional workflow method ID to target specific timers
+  
+  **Returns:** A CompletableFuture that completes when timers are completed
+</ParamField>
+
+### Delegated Tasks
+
+<ParamField path="completeDelegatedTaskAsync" type="CompletableFuture<Unit>">
+  Completes a delegated task from an external system
+  
+  **Parameters:**
+  - `serviceName: String` - The service name
+  - `taskId: String` - The task ID (from Task.taskId)
+  - `result: Any?` - The task result
+  
+  **Returns:** A CompletableFuture that completes when the task is marked complete
+  
+  **Example:**
+  ```kotlin
+  // In external system after processing
+  client.completeDelegatedTaskAsync(
+    "PaymentService",
+    taskId,
+    PaymentResult(success = true)
+  ).join()
+  ```
+</ParamField>
+
+### Query Methods
+
+<ParamField path="getIds" type="<T> Set<String>">
+  Gets all workflow IDs associated with a tag
+  
+  **Parameters:**
+  - `stub: T` - The workflow stub (must be from getWorkflowByTag)
+  
+  **Returns:** Set of workflow IDs
+  
+  **Example:**
+  ```kotlin
+  val workflow = client.getWorkflowByTag(
+    BookingWorkflow::class.java,
+    "customer-12345"
+  )
+  val ids = client.getIds(workflow)
+  println("Found ${ids.size} workflows for customer")
+  ```
+</ParamField>
+
+### Properties
+
+<ParamField path="lastDeferred" type="Deferred<*>?">
+  Gets the last Deferred created by calling a stub method
+  
+  **Example:**
+  ```kotlin
+  val workflow = client.newWorkflow(BookingWorkflow::class.java)
+  workflow.processBooking("booking-123") // Dispatches workflow
+  val deferred = client.lastDeferred // Get the Deferred
+  ```
+</ParamField>
+
+<ParamField path="getName" type="String">
+  Gets the client name (used for message routing)
+</ParamField>
+
+### Lifecycle
+
+<ParamField path="close" type="Unit">
+  Closes the client and releases resources
+  
+  **Example:**
+  ```kotlin
+  client.use { client ->
+    // Use client
+  } // Automatically closed
+  ```
+</ParamField>
+
+## Usage Example
+
+```kotlin
+import io.infinitic.clients.InfiniticClient
+import java.time.Duration
+
+fun main() {
+  // Create client from configuration
+  val client = InfiniticClient.fromYamlResource("infinitic.yml")
+  
+  try {
+    // Start a new workflow
+    val workflow = client.newWorkflow(
+      BookingWorkflow::class.java,
+      tags = setOf("customer-12345")
+    )
+    
+    val deferred = client.startAsync {
+      workflow.processBooking("booking-789")
+    }.join()
+    
+    println("Workflow started: ${deferred.id}")
+    
+    // Wait for result (with timeout)
+    val result = deferred.await()
+    println("Booking result: $result")
+    
+    // Query workflows by tag
+    val taggedWorkflow = client.getWorkflowByTag(
+      BookingWorkflow::class.java,
+      "customer-12345"
+    )
+    val workflowIds = client.getIds(taggedWorkflow)
+    println("Customer has ${workflowIds.size} workflows")
+    
+  } finally {
+    client.close()
+  }
+}
+```
+
+## Thread Safety
+
+The `InfiniticClient` is thread-safe and can be shared across multiple threads. It's recommended to create a single instance and reuse it throughout your application.
+
+## See Also
+
+- [Client Configuration](/api/config/client-config) - For configuration options
+- [Deferred](/api/deferred) - For handling asynchronous results
+- [Workflow](/api/workflow) - For workflow implementation

@@ -1,0 +1,435 @@
+---
+title: Sub-workflows
+description: Learn how to compose workflows from other workflows
+---
+
+Sub-workflows allow you to compose complex workflows from simpler, reusable workflow components. This enables modularity, reusability, and better organization of workflow logic.
+
+## Why Use Sub-workflows?
+
+<CardGroup cols={2}>
+  <Card title="Modularity" icon="cubes">
+    Break complex workflows into smaller, manageable pieces
+  </Card>
+  <Card title="Reusability" icon="recycle">
+    Use the same workflow logic in multiple parent workflows
+  </Card>
+  <Card title="Separation of Concerns" icon="layer-group">
+    Keep each workflow focused on a single responsibility
+  </Card>
+  <Card title="Independent Scaling" icon="chart-line">
+    Scale parent and child workflows independently
+  </Card>
+</CardGroup>
+
+## Creating Workflow Stubs
+
+Use `newWorkflow()` to create a stub for calling another workflow:
+
+<CodeGroup>
+```kotlin Kotlin
+class ParentWorkflow : Workflow(), ParentWorkflowInterface {
+  // Create child workflow stub
+  private val childWorkflow = newWorkflow(ChildWorkflow::class.java)
+  
+  override fun execute(): String {
+    // Call child workflow
+    return childWorkflow.process()
+  }
+}
+```
+
+```java Java
+public class ParentWorkflowImpl extends Workflow implements ParentWorkflow {
+  // Create child workflow stub
+  private final ChildWorkflow childWorkflow = 
+      newWorkflow(ChildWorkflow.class);
+  
+  @Override
+  public String execute() {
+    // Call child workflow
+    return childWorkflow.process();
+  }
+}
+```
+</CodeGroup>
+
+## Synchronous Calls
+
+Call child workflows synchronously when you need the result immediately:
+
+```kotlin
+interface StringUtilWorkflow {
+  fun concat(str: String): String
+  fun reverse(str: String): String
+}
+
+class DataProcessingWorkflow : Workflow(), DataProcessingWorkflowInterface {
+  private val stringUtil = newWorkflow(StringUtilWorkflow::class.java)
+  
+  override fun process(input: String): String {
+    // Sequential calls to child workflow
+    var result = stringUtil.concat(input)
+    result = stringUtil.reverse(result)
+    return result
+  }
+}
+```
+
+## Asynchronous Calls
+
+Use `dispatch()` to call child workflows asynchronously:
+
+```kotlin
+class ParentWorkflow : Workflow(), ParentWorkflowInterface {
+  private val childWorkflow = newWorkflow(ChildWorkflow::class.java)
+  
+  override fun executeAsync(): String {
+    // Dispatch child workflow asynchronously
+    val deferred = dispatch(childWorkflow::process, "input")
+    
+    // Do other work...
+    
+    // Wait for result
+    return deferred.await()
+  }
+}
+```
+
+## Parallel Sub-workflows
+
+Dispatch multiple child workflows in parallel:
+
+```kotlin
+class DataAggregationWorkflow : Workflow(), DataAggregationWorkflowInterface {
+  private val userWorkflow = newWorkflow(UserDataWorkflow::class.java)
+  private val orderWorkflow = newWorkflow(OrderDataWorkflow::class.java)
+  private val analyticsWorkflow = newWorkflow(AnalyticsWorkflow::class.java)
+  
+  override fun aggregateData(userId: String): AggregatedData {
+    // Start all workflows in parallel
+    val userDeferred = dispatch(userWorkflow::fetchUserData, userId)
+    val orderDeferred = dispatch(orderWorkflow::fetchOrders, userId)
+    val analyticsDeferred = dispatch(analyticsWorkflow::fetchAnalytics, userId)
+    
+    // Wait for all to complete
+    val userData = userDeferred.await()
+    val orders = orderDeferred.await()
+    val analytics = analyticsDeferred.await()
+    
+    return AggregatedData(userData, orders, analytics)
+  }
+}
+```
+
+## Recursive Workflows
+
+Workflows can call themselves recursively:
+
+```kotlin
+interface FactorialWorkflow {
+  fun factorial(n: Long): Long
+}
+
+class FactorialWorkflowImpl : Workflow(), FactorialWorkflow {
+  private val childWorkflow = newWorkflow(FactorialWorkflow::class.java)
+  
+  override fun factorial(n: Long): Long {
+    return when {
+      n > 1 -> n * childWorkflow.factorial(n - 1)
+      else -> 1
+    }
+  }
+}
+```
+
+<CodeGroup>
+```kotlin Usage
+val workflow = client.newWorkflow(FactorialWorkflow::class.java)
+val result = workflow.factorial(14) // 87178291200
+```
+
+```java Usage
+FactorialWorkflow workflow = client.newWorkflow(FactorialWorkflow.class);
+Long result = workflow.factorial(14L); // 87178291200
+```
+</CodeGroup>
+
+## Workflow Stubs with Tags
+
+Create child workflows with specific tags for routing or identification:
+
+```kotlin
+class OrderWorkflow : Workflow(), OrderWorkflowInterface {
+  override fun processOrder(orderId: String, priority: String): OrderResult {
+    // Create child workflow with tags
+    val paymentWorkflow = newWorkflow(
+      PaymentWorkflow::class.java,
+      tags = setOf("payment", "order-$orderId", "priority-$priority")
+    )
+    
+    return paymentWorkflow.processPayment(orderId)
+  }
+}
+```
+
+## Workflow Stubs with Metadata
+
+Pass metadata to child workflows for context or tracing:
+
+```kotlin
+class ParentWorkflow : Workflow(), ParentWorkflowInterface {
+  override fun process(requestId: String) {
+    // Create child workflow with metadata
+    val childWorkflow = newWorkflow(
+      ChildWorkflow::class.java,
+      meta = mapOf(
+        "parentWorkflowId" to workflowId.toByteArray(),
+        "requestId" to requestId.toByteArray(),
+        "timestamp" to System.currentTimeMillis().toString().toByteArray()
+      )
+    )
+    
+    childWorkflow.execute()
+  }
+}
+```
+
+## Accessing Existing Workflows
+
+### By ID
+
+Get a stub for an existing workflow instance by its ID:
+
+```kotlin
+class MonitoringWorkflow : Workflow(), MonitoringWorkflowInterface {
+  override fun checkStatus(workflowId: String): WorkflowStatus {
+    // Get existing workflow by ID
+    val target = getWorkflowById(DataProcessingWorkflow::class.java, workflowId)
+    
+    // Send signal to the workflow
+    target.statusChannel.send("health-check")
+    
+    return WorkflowStatus.RUNNING
+  }
+}
+```
+
+### By Tag
+
+Get a stub for an existing workflow instance by its tag:
+
+```kotlin
+class AdminWorkflow : Workflow(), AdminWorkflowInterface {
+  override fun notifyAllOrderWorkflows(message: String) {
+    // Get workflow by tag
+    val orderWorkflow = getWorkflowByTag(
+      OrderWorkflow::class.java,
+      "order-processor"
+    )
+    
+    // Send signal
+    orderWorkflow.notificationChannel.send(message)
+  }
+}
+```
+
+## Combining Services and Sub-workflows
+
+Mix service calls and sub-workflow calls in the same workflow:
+
+```kotlin
+class BookingWorkflow : Workflow(), BookingWorkflowInterface {
+  // Services
+  private val inventoryService = newService(InventoryService::class.java)
+  private val emailService = newService(EmailService::class.java)
+  
+  // Sub-workflows
+  private val paymentWorkflow = newWorkflow(PaymentWorkflow::class.java)
+  private val notificationWorkflow = newWorkflow(NotificationWorkflow::class.java)
+  
+  override fun bookItem(userId: String, itemId: String): BookingResult {
+    // Check inventory (service)
+    val available = inventoryService.checkAvailability(itemId)
+    
+    if (!available) {
+      throw ItemNotAvailableException(itemId)
+    }
+    
+    // Process payment (sub-workflow)
+    val payment = paymentWorkflow.charge(userId, itemId)
+    
+    // Reserve item (service)
+    inventoryService.reserve(itemId)
+    
+    // Send notifications (sub-workflow and service in parallel)
+    val notifDeferred = dispatch(notificationWorkflow::notify, userId, "Booking confirmed")
+    val emailDeferred = dispatch(emailService::send, userId, "Confirmation email")
+    
+    notifDeferred.await()
+    emailDeferred.await()
+    
+    return BookingResult(payment, itemId)
+  }
+}
+```
+
+## Lifecycle and Cancellation
+
+When a parent workflow is canceled, all running child workflows are automatically canceled:
+
+```kotlin
+class ParentWorkflow : Workflow(), ParentWorkflowInterface {
+  private val childWorkflow = newWorkflow(
+    ChildWorkflow::class.java,
+    tags = setOf("child-task")
+  )
+  
+  override fun executeLongRunning() {
+    // Start child workflow
+    childWorkflow.longRunningTask()
+    
+    // If this workflow is canceled, the child workflow
+    // will also be canceled automatically
+  }
+}
+```
+
+## Complete Example
+
+Here's a complete example showing a complex workflow orchestration:
+
+```kotlin
+import io.infinitic.workflows.Workflow
+import io.infinitic.workflows.and
+
+interface UserOnboardingWorkflow {
+  fun onboardUser(userId: String, email: String): OnboardingResult
+}
+
+class UserOnboardingWorkflowImpl : Workflow(), UserOnboardingWorkflow {
+  // Services
+  private val userService = newService(UserService::class.java)
+  private val emailService = newService(EmailService::class.java)
+  
+  // Sub-workflows
+  private val accountSetupWorkflow = newWorkflow(AccountSetupWorkflow::class.java)
+  private val permissionsWorkflow = newWorkflow(PermissionsWorkflow::class.java)
+  private val notificationWorkflow = newWorkflow(NotificationWorkflow::class.java)
+  
+  override fun onboardUser(userId: String, email: String): OnboardingResult {
+    // 1. Create user account (service)
+    val user = userService.createUser(userId, email)
+    
+    // 2. Setup account and permissions in parallel (sub-workflows)
+    val accountDeferred = dispatch(accountSetupWorkflow::setup, userId)
+    val permsDeferred = dispatch(permissionsWorkflow::assignDefaultPermissions, userId)
+    
+    val results = (accountDeferred and permsDeferred).await()
+    val accountSetup = results[0] as AccountSetup
+    val permissions = results[1] as Permissions
+    
+    // 3. Send welcome email (service)
+    emailService.sendWelcome(email)
+    
+    // 4. Start notification workflow (sub-workflow)
+    notificationWorkflow.scheduleOnboardingReminders(userId)
+    
+    return OnboardingResult(user, accountSetup, permissions)
+  }
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Design for single responsibility">
+    Each workflow should have a clear, single purpose:
+    
+    ```kotlin
+    // ✅ Good - focused workflows
+    interface PaymentWorkflow {
+      fun processPayment(orderId: String): Payment
+    }
+    
+    interface ShippingWorkflow {
+      fun shipOrder(orderId: String): Tracking
+    }
+    
+    // ❌ Bad - doing too much
+    interface OrderWorkflow {
+      fun processPayment(orderId: String): Payment
+      fun shipOrder(orderId: String): Tracking
+      fun sendNotifications(orderId: String)
+      fun updateInventory(orderId: String)
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Use parallel execution when possible">
+    Dispatch independent child workflows in parallel:
+    
+    ```kotlin
+    // ✅ Fast - parallel execution
+    val d1 = dispatch(workflow1::process)
+    val d2 = dispatch(workflow2::process)
+    val d3 = dispatch(workflow3::process)
+    (d1 and d2 and d3).await()
+    
+    // ❌ Slow - sequential execution
+    workflow1.process()
+    workflow2.process()
+    workflow3.process()
+    ```
+  </Accordion>
+  
+  <Accordion title="Initialize workflow stubs as properties">
+    Create workflow stubs once as class properties:
+    
+    ```kotlin
+    // ✅ Good
+    class ParentWorkflow : Workflow(), ParentWorkflowInterface {
+      private val childWorkflow = newWorkflow(ChildWorkflow::class.java)
+    }
+    
+    // ❌ Bad - creates new stub each time
+    class ParentWorkflow : Workflow(), ParentWorkflowInterface {
+      override fun process() {
+        val childWorkflow = newWorkflow(ChildWorkflow::class.java)
+      }
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Use tags for workflow organization">
+    Tag workflows for easy identification and routing:
+    
+    ```kotlin
+    private val orderWorkflow = newWorkflow(
+      OrderProcessingWorkflow::class.java,
+      tags = setOf(
+        "order-${orderId}",
+        "user-${userId}",
+        "priority-high"
+      )
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Channels" icon="tower-broadcast" href="/workflows/channels">
+    Learn about workflow channels for external signals
+  </Card>
+  <Card title="Timers" icon="timer" href="/workflows/timers">
+    Add delays and timeouts to workflows
+  </Card>
+  <Card title="Versioning" icon="code-branch" href="/workflows/versioning">
+    Update workflows while maintaining compatibility
+  </Card>
+  <Card title="Calling Services" icon="server" href="/workflows/calling-services">
+    Learn service orchestration patterns
+  </Card>
+</CardGroup>

@@ -1,0 +1,363 @@
+---
+title: Booking Workflow
+description: Build a complete travel booking workflow with Infinitic
+---
+
+This example demonstrates a realistic booking workflow that coordinates multiple services to book a complete travel package. You'll learn how to handle parallel execution, manage state, and implement compensating actions.
+
+## What You'll Build
+
+A travel booking system that:
+- Books flights and hotels in parallel
+- Handles booking confirmations
+- Manages customer notifications
+- Implements proper error handling
+
+<Steps>
+
+### Define Service Interfaces
+
+Create interfaces for each booking service:
+
+```kotlin
+package com.example.booking
+
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class FlightBooking(
+    val flightId: String,
+    val passenger: String,
+    val confirmationCode: String
+)
+
+@Serializable
+data class HotelBooking(
+    val hotelId: String,
+    val guest: String,
+    val confirmationCode: String
+)
+
+@Serializable
+data class CarRental(
+    val carId: String,
+    val driver: String,
+    val confirmationCode: String
+)
+
+interface FlightService {
+    fun searchFlights(origin: String, destination: String): List<String>
+    fun bookFlight(flightId: String, passenger: String): FlightBooking
+    fun cancelFlight(confirmationCode: String)
+}
+
+interface HotelService {
+    fun searchHotels(location: String): List<String>
+    fun bookHotel(hotelId: String, guest: String): HotelBooking
+    fun cancelHotel(confirmationCode: String)
+}
+
+interface CarService {
+    fun bookCar(carType: String, driver: String): CarRental
+    fun cancelCar(confirmationCode: String)
+}
+
+interface NotificationService {
+    fun sendConfirmation(email: String, message: String)
+}
+```
+
+### Implement the Services
+
+Implement each service with business logic:
+
+```kotlin
+package com.example.booking
+
+import java.util.UUID
+
+class FlightServiceImpl : FlightService {
+    override fun searchFlights(origin: String, destination: String): List<String> {
+        // Simulate API call
+        Thread.sleep(500)
+        return listOf("FL001", "FL002", "FL003")
+    }
+    
+    override fun bookFlight(flightId: String, passenger: String): FlightBooking {
+        // Simulate booking process
+        Thread.sleep(1000)
+        return FlightBooking(
+            flightId = flightId,
+            passenger = passenger,
+            confirmationCode = "FLIGHT-${UUID.randomUUID()}"
+        )
+    }
+    
+    override fun cancelFlight(confirmationCode: String) {
+        Thread.sleep(500)
+        println("Flight $confirmationCode cancelled")
+    }
+}
+
+class HotelServiceImpl : HotelService {
+    override fun searchHotels(location: String): List<String> {
+        Thread.sleep(500)
+        return listOf("HTL001", "HTL002", "HTL003")
+    }
+    
+    override fun bookHotel(hotelId: String, guest: String): HotelBooking {
+        Thread.sleep(1000)
+        return HotelBooking(
+            hotelId = hotelId,
+            guest = guest,
+            confirmationCode = "HOTEL-${UUID.randomUUID()}"
+        )
+    }
+    
+    override fun cancelHotel(confirmationCode: String) {
+        Thread.sleep(500)
+        println("Hotel $confirmationCode cancelled")
+    }
+}
+
+class CarServiceImpl : CarService {
+    override fun bookCar(carType: String, driver: String): CarRental {
+        Thread.sleep(800)
+        return CarRental(
+            carId = carType,
+            driver = driver,
+            confirmationCode = "CAR-${UUID.randomUUID()}"
+        )
+    }
+    
+    override fun cancelCar(confirmationCode: String) {
+        Thread.sleep(500)
+        println("Car rental $confirmationCode cancelled")
+    }
+}
+
+class NotificationServiceImpl : NotificationService {
+    override fun sendConfirmation(email: String, message: String) {
+        Thread.sleep(200)
+        println("Email sent to $email: $message")
+    }
+}
+```
+
+### Define the Workflow Interface
+
+Create the main booking workflow interface:
+
+```kotlin
+package com.example.booking
+
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class TravelPackage(
+    val flight: FlightBooking,
+    val hotel: HotelBooking,
+    val car: CarRental?
+)
+
+interface BookingWorkflow {
+    fun bookTravel(
+        passenger: String,
+        email: String,
+        origin: String,
+        destination: String,
+        includeCar: Boolean = false
+    ): TravelPackage
+}
+```
+
+### Implement the Workflow
+
+Orchestrate the booking process with parallel execution:
+
+```kotlin
+package com.example.booking
+
+import io.infinitic.workflows.Workflow
+
+class BookingWorkflowImpl : Workflow(), BookingWorkflow {
+    private val flightService = newService(FlightService::class.java)
+    private val hotelService = newService(HotelService::class.java)
+    private val carService = newService(CarService::class.java)
+    private val notificationService = newService(NotificationService::class.java)
+    
+    override fun bookTravel(
+        passenger: String,
+        email: String,
+        origin: String,
+        destination: String,
+        includeCar: Boolean
+    ): TravelPackage {
+        // Search for options
+        val flights = flightService.searchFlights(origin, destination)
+        val hotels = hotelService.searchHotels(destination)
+        
+        // Select first available options
+        val selectedFlight = flights.first()
+        val selectedHotel = hotels.first()
+        
+        // Book flight and hotel in parallel using dispatch
+        val flightDeferred = dispatch(flightService::bookFlight, selectedFlight, passenger)
+        val hotelDeferred = dispatch(hotelService::bookHotel, selectedHotel, passenger)
+        
+        // Wait for both bookings to complete
+        val flightBooking = flightDeferred.await()
+        val hotelBooking = hotelDeferred.await()
+        
+        // Optionally book a car
+        val carBooking = if (includeCar) {
+            carService.bookCar("SUV", passenger)
+        } else {
+            null
+        }
+        
+        // Create the travel package
+        val travelPackage = TravelPackage(
+            flight = flightBooking,
+            hotel = hotelBooking,
+            car = carBooking
+        )
+        
+        // Send confirmation email
+        val message = buildConfirmationMessage(travelPackage)
+        notificationService.sendConfirmation(email, message)
+        
+        return travelPackage
+    }
+    
+    private fun buildConfirmationMessage(pkg: TravelPackage): String {
+        return buildString {
+            appendLine("Your travel booking is confirmed!")
+            appendLine("Flight: ${pkg.flight.confirmationCode}")
+            appendLine("Hotel: ${pkg.hotel.confirmationCode}")
+            pkg.car?.let { appendLine("Car: ${it.confirmationCode}") }
+        }
+    }
+}
+```
+
+### Configure Infinitic
+
+Create the configuration file:
+
+```yaml
+transport: inMemory
+
+services:
+  - name: FlightService
+    class: com.example.booking.FlightServiceImpl
+    concurrency: 10
+  
+  - name: HotelService
+    class: com.example.booking.HotelServiceImpl
+    concurrency: 10
+  
+  - name: CarService
+    class: com.example.booking.CarServiceImpl
+    concurrency: 5
+  
+  - name: NotificationService
+    class: com.example.booking.NotificationServiceImpl
+    concurrency: 20
+
+workflows:
+  - name: BookingWorkflow
+    class: com.example.booking.BookingWorkflowImpl
+```
+
+### Start the Workers
+
+Create a worker to process all tasks:
+
+```kotlin
+package com.example.booking
+
+import io.infinitic.worker.InfiniticWorker
+
+fun main() {
+    val worker = InfiniticWorker.fromConfigFile("infinitic.yml")
+    worker.start()
+    println("Booking workers started...")
+}
+```
+
+### Execute the Workflow
+
+Book a complete travel package:
+
+```kotlin
+package com.example.booking
+
+import io.infinitic.client.InfiniticClient
+
+fun main() {
+    val client = InfiniticClient.fromConfigFile("infinitic.yml")
+    
+    val workflow = client.newWorkflow(BookingWorkflow::class.java)
+    
+    println("Booking travel package...")
+    
+    val travelPackage = workflow.bookTravel(
+        passenger = "John Doe",
+        email = "john.doe@example.com",
+        origin = "NYC",
+        destination = "LAX",
+        includeCar = true
+    )
+    
+    println("\nBooking complete!")
+    println("Flight: ${travelPackage.flight.confirmationCode}")
+    println("Hotel: ${travelPackage.hotel.confirmationCode}")
+    travelPackage.car?.let { println("Car: ${it.confirmationCode}") }
+    
+    client.close()
+}
+```
+
+</Steps>
+
+## Expected Output
+
+```
+Booking travel package...
+Email sent to john.doe@example.com: Your travel booking is confirmed!
+Flight: FLIGHT-a1b2c3d4-...
+Hotel: HOTEL-e5f6g7h8-...
+Car: CAR-i9j0k1l2-...
+
+Booking complete!
+Flight: FLIGHT-a1b2c3d4-...
+Hotel: HOTEL-e5f6g7h8-...
+Car: CAR-i9j0k1l2-...
+```
+
+## Key Concepts
+
+<AccordionGroup>
+<Accordion title="Parallel Execution">
+Use `dispatch()` to execute tasks in parallel. The workflow dispatches flight and hotel bookings simultaneously, then waits for both to complete with `await()`.
+</Accordion>
+
+<Accordion title="Sequential After Parallel">
+After parallel tasks complete, the workflow continues sequentially - booking the car and sending the notification only after receiving both flight and hotel confirmations.
+</Accordion>
+
+<Accordion title="Deferred Results">
+The `dispatch()` method returns a `Deferred` object that represents a future result. Call `await()` to block until the result is ready.
+</Accordion>
+
+<Accordion title="State Management">
+Workflows maintain state automatically. If a worker crashes, Infinitic will resume the workflow from where it left off using the persisted state.
+</Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+- Add error handling with the [saga pattern](/examples/saga-pattern)
+- Learn about [workflow channels](/workflows/channels) for cancellations
+- Implement [approval workflow](/examples/approval-workflow) for booking verification

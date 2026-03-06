@@ -1,0 +1,175 @@
+---
+title: Workflows Overview
+description: Learn about Infinitic workflows and how they orchestrate distributed services
+---
+
+Workflows are the core orchestration component in Infinitic. They coordinate the execution of services, manage state, handle timing, and ensure reliable distributed execution.
+
+## What are Workflows?
+
+Workflows in Infinitic are classes that:
+- Extend the `Workflow` base class
+- Define business logic that orchestrates services and other workflows
+- Execute deterministically to ensure reliability
+- Maintain state across distributed executions
+- Handle failures and retries automatically
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Service Orchestration" icon="diagram-project">
+    Call and coordinate multiple services with automatic retry and error handling
+  </Card>
+  <Card title="Asynchronous Execution" icon="clock">
+    Dispatch tasks asynchronously and wait for results when needed using Deferred objects
+  </Card>
+  <Card title="Sub-workflows" icon="sitemap">
+    Compose complex workflows from simpler workflow components
+  </Card>
+  <Card title="Channels" icon="tower-broadcast">
+    Receive external signals and events during workflow execution
+  </Card>
+  <Card title="Timers" icon="timer">
+    Wait for specific durations or until specific times
+  </Card>
+  <Card title="Versioning" icon="code-branch">
+    Update workflow logic while maintaining compatibility with running instances
+  </Card>
+</CardGroup>
+
+## Basic Workflow Structure
+
+<CodeGroup>
+```kotlin Kotlin
+import io.infinitic.workflows.Workflow
+
+// Define the workflow interface
+interface BookingWorkflow {
+  fun bookTrip(userId: String, destination: String): BookingResult
+}
+
+// Implement the workflow
+class BookingWorkflowImpl : Workflow(), BookingWorkflow {
+  
+  // Create service stubs
+  private val flightService = newService(FlightService::class.java)
+  private val hotelService = newService(HotelService::class.java)
+  private val paymentService = newService(PaymentService::class.java)
+  
+  override fun bookTrip(userId: String, destination: String): BookingResult {
+    // Book flight
+    val flight = flightService.bookFlight(userId, destination)
+    
+    // Book hotel
+    val hotel = hotelService.bookHotel(userId, destination)
+    
+    // Process payment
+    val payment = paymentService.charge(userId, flight.price + hotel.price)
+    
+    return BookingResult(flight, hotel, payment)
+  }
+}
+```
+
+```java Java
+import io.infinitic.workflows.Workflow;
+
+// Define the workflow interface
+public interface BookingWorkflow {
+  BookingResult bookTrip(String userId, String destination);
+}
+
+// Implement the workflow
+public class BookingWorkflowImpl extends Workflow implements BookingWorkflow {
+  
+  // Create service stubs
+  private final FlightService flightService = newService(FlightService.class);
+  private final HotelService hotelService = newService(HotelService.class);
+  private final PaymentService paymentService = newService(PaymentService.class);
+  
+  @Override
+  public BookingResult bookTrip(String userId, String destination) {
+    // Book flight
+    Flight flight = flightService.bookFlight(userId, destination);
+    
+    // Book hotel
+    Hotel hotel = hotelService.bookHotel(userId, destination);
+    
+    // Process payment
+    Payment payment = paymentService.charge(userId, flight.getPrice() + hotel.getPrice());
+    
+    return new BookingResult(flight, hotel, payment);
+  }
+}
+```
+</CodeGroup>
+
+## Workflow Context
+
+Every workflow has access to contextual information during execution:
+
+```kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  override fun process() {
+    // Access workflow context
+    val wfName = Workflow.workflowName     // Workflow name
+    val wfId = Workflow.workflowId         // Unique workflow instance ID
+    val methodName = Workflow.methodName   // Current method being executed
+    val methodId = Workflow.methodId       // Unique method execution ID
+    val tags = Workflow.tags               // Workflow tags
+    val meta = Workflow.meta               // Workflow metadata
+  }
+}
+```
+
+## Determinism
+
+Workflows must be deterministic to ensure reliability. This means:
+
+<Warning>
+  **Avoid Non-Deterministic Operations**
+  
+  Do not use these directly in workflow code:
+  - `System.currentTimeMillis()`, `Instant.now()`, or any time-based functions
+  - Random number generators
+  - External API calls outside of service stubs
+  - Direct database access
+  - File I/O operations
+</Warning>
+
+Instead:
+- Use `timer()` for time-based operations
+- Use `inline()` for operations that need to run synchronously
+- Use service stubs for all external interactions
+
+## Inline Tasks
+
+For simple computations that don't require services, use inline tasks:
+
+```kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  override fun calculate(values: List<Int>): Int {
+    // Run computation inline (synchronously)
+    return inline {
+      values.sum()
+    }
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Defining Workflows" icon="code" href="/workflows/defining-workflows">
+    Learn how to create and structure workflows
+  </Card>
+  <Card title="Calling Services" icon="server" href="/workflows/calling-services">
+    Understand how to call services from workflows
+  </Card>
+  <Card title="Workflow Methods" icon="function" href="/workflows/workflow-methods">
+    Explore available workflow methods and operations
+  </Card>
+  <Card title="Channels" icon="tower-broadcast" href="/workflows/channels">
+    Receive external signals during execution
+  </Card>
+</CardGroup>

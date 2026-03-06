@@ -1,0 +1,299 @@
+---
+title: 'Metadata'
+description: 'Attach custom data to workflows for tracking and context'
+icon: 'note-sticky'
+---
+
+Metadata allows you to attach arbitrary key-value data to workflows. This is useful for tracking business context, debugging information, or any custom data you want associated with a workflow instance.
+
+## What is Metadata?
+
+Metadata is a map of string keys to byte array values that you can attach to workflows at creation time. Unlike tags (which are for identification and retrieval), metadata is for storing contextual information.
+
+### Metadata Use Cases
+
+- **Business context** - Store customer info, order details, or request data
+- **Debugging information** - Track request IDs, trace IDs, or correlation IDs
+- **Audit trails** - Record who started the workflow and when
+- **Feature flags** - Store configuration or feature toggle states
+- **Custom attributes** - Any domain-specific data
+
+## Adding Metadata to Workflows
+
+Attach metadata when creating a workflow:
+
+```kotlin
+val metadata = mapOf(
+    "userId" to "12345".toByteArray(),
+    "requestId" to "req-abc-123".toByteArray(),
+    "source" to "web-app".toByteArray()
+)
+
+val workflow = client.newWorkflow(
+    MyWorkflow::class.java,
+    meta = metadata
+)
+workflow.process(data)
+```
+
+## Storing Different Data Types
+
+Since metadata values are byte arrays, you can store any serializable data:
+
+### Strings
+
+```kotlin
+val meta = mapOf(
+    "userName" to "john.doe".toByteArray(),
+    "email" to "john@example.com".toByteArray()
+)
+```
+
+### Numbers
+
+```kotlin
+val meta = mapOf(
+    "priority" to 5.toString().toByteArray(),
+    "retryCount" to 3.toString().toByteArray()
+)
+```
+
+### JSON Objects
+
+```kotlin
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+
+val userContext = mapOf(
+    "id" to "12345",
+    "name" to "John Doe",
+    "role" to "admin"
+)
+
+val meta = mapOf(
+    "userContext" to Json.encodeToString(userContext).toByteArray()
+)
+```
+
+### Serialized Objects
+
+```kotlin
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+
+@Serializable
+data class OrderContext(
+    val orderId: String,
+    val customerId: String,
+    val amount: Double
+)
+
+val orderContext = OrderContext(
+    orderId = "ORD-001",
+    customerId = "CUST-123",
+    amount = 99.99
+)
+
+val meta = mapOf(
+    "orderContext" to Json.encodeToString(orderContext).toByteArray()
+)
+```
+
+## Metadata in CloudEvents
+
+Metadata is included in CloudEvents emitted by Infinitic. When a workflow is dispatched, the metadata is available in the `WORKFLOW_META` field:
+
+```kotlin
+// CloudEvent data structure
+{
+    "workflowName": "MyWorkflow",
+    "workflowId": "550e8400-e29b-41d4-a716-446655440000",
+    "workflowMeta": {
+        "userId": "12345",
+        "requestId": "req-abc-123",
+        "source": "web-app"
+    },
+    "workflowTags": ["user:12345"]
+}
+```
+
+## WorkflowMeta Class
+
+Internally, metadata is managed by the `WorkflowMeta` class:
+
+```kotlin
+data class WorkflowMeta(val meta: Map<String, ByteArray>)
+```
+
+## Combining Tags and Metadata
+
+Use tags for workflow identification and metadata for context:
+
+```kotlin
+val workflow = client.newWorkflow(
+    OrderWorkflow::class.java,
+    tags = setOf(
+        "order:ORD-2024-001",
+        "customer:CUST-123"
+    ),
+    meta = mapOf(
+        "customerName" to "John Doe".toByteArray(),
+        "orderAmount" to "99.99".toByteArray(),
+        "currency" to "USD".toByteArray(),
+        "createdBy" to "web-app".toByteArray(),
+        "timestamp" to System.currentTimeMillis().toString().toByteArray()
+    )
+)
+```
+
+## Metadata Helper Functions
+
+Create helper functions for common metadata patterns:
+
+```kotlin
+class MetadataBuilder {
+    private val metadata = mutableMapOf<String, ByteArray>()
+    
+    fun addString(key: String, value: String) = apply {
+        metadata[key] = value.toByteArray()
+    }
+    
+    fun addInt(key: String, value: Int) = apply {
+        metadata[key] = value.toString().toByteArray()
+    }
+    
+    fun addJson(key: String, value: Any) = apply {
+        metadata[key] = Json.encodeToString(value).toByteArray()
+    }
+    
+    fun addTimestamp(key: String = "timestamp") = apply {
+        metadata[key] = System.currentTimeMillis().toString().toByteArray()
+    }
+    
+    fun build(): Map<String, ByteArray> = metadata
+}
+
+// Usage
+val meta = MetadataBuilder()
+    .addString("userId", "12345")
+    .addInt("priority", 5)
+    .addTimestamp()
+    .build()
+```
+
+## Reading Metadata from Events
+
+When listening to CloudEvents, you can extract metadata:
+
+```kotlin
+import io.infinitic.cloudEvents.CloudEventListener
+
+class MyEventListener : CloudEventListener {
+    override suspend fun onEvent(event: CloudEvent) {
+        if (event.type == "infinitic.workflow.dispatch") {
+            val data = parseCloudEventData(event)
+            val metadata = data["workflowMeta"] as? Map<String, String>
+            
+            val userId = metadata?.get("userId")
+            val requestId = metadata?.get("requestId")
+            
+            logger.info("Workflow dispatched for user: $userId, request: $requestId")
+        }
+    }
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep metadata lightweight">
+    Metadata is stored with the workflow. Keep it reasonably sized to avoid storage bloat.
+  </Accordion>
+
+  <Accordion title="Use consistent key naming">
+    Establish a convention for metadata keys (e.g., camelCase, snake_case) and stick to it.
+  </Accordion>
+
+  <Accordion title="Don't store secrets">
+    Never store sensitive data like passwords or API keys in metadata.
+  </Accordion>
+
+  <Accordion title="Include trace IDs">
+    Always include request/trace IDs for distributed tracing and debugging.
+  </Accordion>
+
+  <Accordion title="Document metadata schema">
+    Maintain documentation of what metadata keys your application uses and their formats.
+  </Accordion>
+
+  <Accordion title="Use typed wrappers">
+    Create type-safe wrappers around metadata to prevent serialization errors.
+  </Accordion>
+</AccordionGroup>
+
+## Metadata vs Tags
+
+| Feature | Tags | Metadata |
+|---------|------|----------|
+| Purpose | Identification & retrieval | Context & information |
+| Format | Set of strings | Map of string to bytes |
+| Queryable | Yes (getByTag) | No |
+| Size limit | Reasonable (IDs/labels) | Flexible (but keep small) |
+| Use case | Finding workflows | Storing context |
+| Mutability | Immutable | Immutable |
+
+## Example: E-commerce Order Tracking
+
+```kotlin
+@Serializable
+data class OrderMetadata(
+    val customerId: String,
+    val customerEmail: String,
+    val orderTotal: Double,
+    val currency: String,
+    val shippingAddress: String,
+    val paymentMethod: String,
+    val createdAt: Long,
+    val source: String
+)
+
+class OrderWorkflowService(private val client: InfiniticClient) {
+    
+    fun startOrderWorkflow(order: Order): String {
+        val orderMetadata = OrderMetadata(
+            customerId = order.customerId,
+            customerEmail = order.customerEmail,
+            orderTotal = order.total,
+            currency = order.currency,
+            shippingAddress = order.shippingAddress,
+            paymentMethod = order.paymentMethod,
+            createdAt = System.currentTimeMillis(),
+            source = "web-checkout"
+        )
+        
+        val workflow = client.newWorkflow(
+            OrderWorkflow::class.java,
+            tags = setOf(
+                "order:${order.id}",
+                "customer:${order.customerId}",
+                "customId:${order.id}"
+            ),
+            meta = mapOf(
+                "orderMetadata" to Json.encodeToString(orderMetadata).toByteArray(),
+                "requestId" to order.requestId.toByteArray(),
+                "correlationId" to order.correlationId.toByteArray()
+            )
+        )
+        
+        workflow.processOrder(order)
+        return order.id
+    }
+}
+```
+
+## Related Topics
+
+- [Tags](/advanced/tags) - Organize and query workflows
+- [CloudEvents](/advanced/cloud-events) - Access metadata in events
+- [Monitoring](/advanced/monitoring) - Track workflows using metadata

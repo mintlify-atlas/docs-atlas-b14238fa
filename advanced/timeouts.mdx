@@ -1,0 +1,256 @@
+---
+title: 'Timeouts'
+description: 'Configure timeout behavior for tasks and workflows'
+icon: 'clock'
+---
+
+Timeouts ensure that tasks and workflows don't run indefinitely. Infinitic provides flexible timeout configuration with grace periods for cleanup.
+
+## The @Timeout Annotation
+
+Use the `@Timeout` annotation to define timeout behavior for tasks and workflows:
+
+```kotlin
+import io.infinitic.annotations.Timeout
+
+@Timeout(with = CustomTimeout::class)
+class MyService : MyServiceInterface {
+    override fun process(data: String): Result {
+        // Task implementation
+    }
+}
+```
+
+### Method-Level Timeout
+
+Apply timeouts to individual methods:
+
+```kotlin
+class MyService : MyServiceInterface {
+    
+    @Timeout(with = ShortTimeout::class)
+    override fun quickOperation(): Result {
+        // This method has a 10-second timeout
+    }
+    
+    @Timeout(with = LongTimeout::class)
+    override fun slowOperation(): Result {
+        // This method has a 5-minute timeout
+    }
+}
+```
+
+## Implementing WithTimeout
+
+Create custom timeout policies by implementing the `WithTimeout` interface:
+
+```kotlin
+import io.infinitic.tasks.WithTimeout
+
+class CustomTimeout : WithTimeout {
+    override fun getTimeoutSeconds(): Double? {
+        return 30.0 // 30-second timeout
+    }
+    
+    override fun getGracePeriodAfterTimeoutSeconds(): Double {
+        return 5.0 // 5-second grace period for cleanup
+    }
+}
+```
+
+### WithTimeout Interface
+
+The `WithTimeout` interface defines two methods:
+
+```kotlin
+fun interface WithTimeout {
+    /**
+     * Returns the timeout duration in seconds.
+     * Null means no timeout is set.
+     */
+    fun getTimeoutSeconds(): Double?
+    
+    /**
+     * Returns the grace period after the timeout in seconds.
+     * Default is 0 (no grace period).
+     */
+    fun getGracePeriodAfterTimeoutSeconds(): Double = 0.0
+}
+```
+
+**getTimeoutSeconds():**
+- Returns the timeout duration in seconds
+- Return `null` for no timeout
+
+**getGracePeriodAfterTimeoutSeconds():**
+- Returns the grace period after timeout in seconds
+- Default is 0.0 (no grace period)
+- Allows time for cleanup operations
+
+## Timeout Patterns
+
+### Simple Timeout
+
+```kotlin
+class TenSecondTimeout : WithTimeout {
+    override fun getTimeoutSeconds(): Double = 10.0
+}
+```
+
+### Timeout with Grace Period
+
+```kotlin
+class TimeoutWithGrace : WithTimeout {
+    override fun getTimeoutSeconds(): Double = 60.0
+    
+    override fun getGracePeriodAfterTimeoutSeconds(): Double = 10.0
+}
+```
+
+The grace period allows your task to:
+- Close database connections
+- Release resources
+- Save partial state
+- Send cleanup messages
+
+### No Timeout
+
+```kotlin
+class NoTimeout : WithTimeout {
+    override fun getTimeoutSeconds(): Double? = null
+}
+```
+
+### Environment-Based Timeout
+
+```kotlin
+class ConfigurableTimeout : WithTimeout {
+    override fun getTimeoutSeconds(): Double? {
+        return System.getenv("TASK_TIMEOUT")?.toDoubleOrNull() ?: 30.0
+    }
+}
+```
+
+## Workflow Method Timeouts
+
+Set timeouts for workflow methods when dispatching them:
+
+```kotlin
+val workflow = client.newWorkflow(MyWorkflow::class.java)
+val deferred = workflow.processAsync(data)
+
+// The workflow method inherits timeout from @Timeout annotation
+```
+
+## Handling Timeout Events
+
+When a timeout occurs, Infinitic emits timeout events:
+
+- `taskTimedOut` - Task exceeded its timeout
+- `methodTimedOut` - Workflow method exceeded its timeout
+- `remoteMethodTimedOut` - Child workflow method timed out
+
+### Catching Timeouts in Workflows
+
+```kotlin
+try {
+    val result = task.longRunningOperation()
+} catch (e: TaskTimedOutException) {
+    logger.warn("Task timed out, using fallback")
+    return fallbackValue
+}
+```
+
+## Timer Completion
+
+You can manually complete timers in workflows:
+
+```kotlin
+// Complete all timers in a workflow
+client.completeTimersAsync(workflowStub)
+
+// Complete specific timer by method ID
+client.completeTimersAsync(workflowStub, methodId)
+```
+
+## Timeout Configuration
+
+### Class-Level Configuration
+
+```kotlin
+@Timeout(with = DefaultTimeout::class)
+class MyService {
+    // All methods inherit this timeout
+    fun operation1() { }
+    fun operation2() { }
+}
+```
+
+### Method Override
+
+```kotlin
+@Timeout(with = DefaultTimeout::class)
+class MyService {
+    
+    // Uses class-level timeout
+    fun normalOperation() { }
+    
+    // Overrides with method-level timeout
+    @Timeout(with = LongTimeout::class)
+    fun specialOperation() { }
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Set realistic timeouts">
+    Base timeouts on actual task duration plus a buffer for variability and system load.
+  </Accordion>
+
+  <Accordion title="Use grace periods for cleanup">
+    Always provide a grace period for tasks that need to clean up resources or save state.
+  </Accordion>
+
+  <Accordion title="Different timeouts for different operations">
+    Quick operations should have short timeouts, while batch processing might need longer ones.
+  </Accordion>
+
+  <Accordion title="Monitor timeout rates">
+    High timeout rates indicate operations are consistently taking longer than expected.
+  </Accordion>
+
+  <Accordion title="Handle timeout exceptions">
+    Always handle timeout exceptions gracefully with appropriate fallback logic.
+  </Accordion>
+
+  <Accordion title="Test timeout behavior">
+    Test that your tasks properly handle timeouts and grace periods.
+  </Accordion>
+</AccordionGroup>
+
+## Timeout vs Retry
+
+Timeouts and retries work together:
+
+1. Task starts executing
+2. Timeout is reached
+3. Grace period allows cleanup
+4. Task fails with timeout error
+5. Retry policy determines if retry should occur
+
+```kotlin
+@Timeout(with = ThirtySecondTimeout::class)
+@Retry(with = ExponentialBackoff::class)
+class ResilientService {
+    // Will timeout after 30 seconds
+    // Then retry with exponential backoff
+}
+```
+
+## Related Topics
+
+- [Retry Policies](/advanced/retry-policies) - Configure retry behavior after timeouts
+- [Error Handling](/advanced/error-handling) - Handle timeout exceptions
+- [CloudEvents](/advanced/cloud-events) - Monitor timeout events
+- [Monitoring](/advanced/monitoring) - Track timeout metrics

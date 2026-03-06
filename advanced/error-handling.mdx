@@ -1,0 +1,137 @@
+---
+title: 'Error Handling'
+description: 'Handle errors and failures in Infinitic workflows and tasks'
+icon: 'triangle-exclamation'
+---
+
+Infinitic provides robust error handling mechanisms for both tasks and workflows, allowing you to gracefully handle failures and implement custom recovery strategies.
+
+## Task Error Handling
+
+When a task fails, Infinitic captures the exception and provides several ways to handle it:
+
+### Catching Exceptions in Workflows
+
+You can catch exceptions from failed tasks directly in your workflow code:
+
+```kotlin
+try {
+    val result = task.process(data)
+} catch (e: TaskFailedException) {
+    // Handle task failure
+    logger.error("Task failed: ${e.message}")
+    // Implement fallback logic
+}
+```
+
+### Failed Task Events
+
+Infinitic emits CloudEvents when tasks fail, allowing you to monitor and react to failures:
+
+- `taskFailed` - Task execution failed with an exception
+- `taskTimedOut` - Task exceeded its timeout duration
+- `taskCanceled` - Task was canceled before completion
+- `taskUnknown` - Task reference could not be resolved
+
+## Workflow Error Handling
+
+Workflows can also fail, and Infinitic provides similar error handling mechanisms:
+
+### Method Failure Events
+
+- `methodFailed` - Workflow method failed with an exception
+- `methodTimedOut` - Workflow method exceeded timeout
+- `methodCanceled` - Workflow method was canceled
+
+### Remote Method Errors
+
+When calling child workflows, you can handle specific error types:
+
+```kotlin
+try {
+    val result = childWorkflow.execute(params)
+} catch (e: ChildMethodFailedException) {
+    // Handle child workflow failure
+} catch (e: ChildMethodTimedOutException) {
+    // Handle child workflow timeout
+} catch (e: ChildMethodCanceledException) {
+    // Handle child workflow cancellation
+}
+```
+
+## Error Types
+
+### Task Errors
+
+- **TaskFailedError** - Contains the exception thrown during task execution
+- **TaskTimedOutError** - Task exceeded the configured timeout
+- **TaskCanceledError** - Task was explicitly canceled
+
+### Workflow Errors
+
+- **ChildMethodFailedError** - Child workflow method failed
+- **ChildMethodTimedOutError** - Child workflow method timed out
+- **ChildMethodCanceledError** - Child workflow method was canceled
+- **ChildMethodUnknownError** - Child workflow could not be found
+
+## Error Propagation
+
+By default, task failures propagate up to the calling workflow. You can control this behavior:
+
+```kotlin
+// Let errors propagate (default)
+val result = task.process(data)
+
+// Handle errors locally
+try {
+    val result = task.process(data)
+} catch (e: Exception) {
+    // Implement custom error handling
+    return fallbackValue
+}
+```
+
+## Deferred Status
+
+You can check the status of a deferred task or workflow:
+
+```kotlin
+val deferred = task.processAsync(data)
+val status = deferred.status()
+
+when (status) {
+    DeferredStatus.ONGOING -> // Still running
+    DeferredStatus.COMPLETED -> // Completed successfully
+    DeferredStatus.FAILED -> // Failed with error
+    DeferredStatus.CANCELED -> // Was canceled
+    DeferredStatus.TIMED_OUT -> // Exceeded timeout
+    DeferredStatus.UNKNOWN -> // Unknown status
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use specific exception handlers">
+    Catch specific exception types rather than generic exceptions to handle different failure scenarios appropriately.
+  </Accordion>
+
+  <Accordion title="Implement fallback strategies">
+    Design your workflows with fallback logic for critical tasks to ensure graceful degradation.
+  </Accordion>
+
+  <Accordion title="Log errors with context">
+    Include relevant context (task ID, workflow ID, parameters) when logging errors for debugging.
+  </Accordion>
+
+  <Accordion title="Monitor error events">
+    Set up CloudEvents listeners to monitor error events and alert on critical failures.
+  </Accordion>
+</AccordionGroup>
+
+## Related Topics
+
+- [Retry Policies](/advanced/retry-policies) - Configure automatic retry behavior
+- [Timeouts](/advanced/timeouts) - Set timeout durations for tasks and workflows
+- [CloudEvents](/advanced/cloud-events) - Monitor error events
+- [Monitoring](/advanced/monitoring) - Track system health and failures

@@ -1,0 +1,541 @@
+---
+title: Workflow Methods
+description: Complete reference for methods available in Infinitic workflows
+---
+
+The `Workflow` base class provides several methods for creating stubs, dispatching tasks, managing channels, and handling timers.
+
+## Creating Stubs
+
+### newService()
+
+Create a stub for calling a service.
+
+```kotlin
+protected fun <T : Any> newService(
+  klass: Class<out T>,
+  tags: Set<String>? = null,
+  meta: Map<String, ByteArray>? = null
+): T
+```
+
+<ParamField path="klass" type="Class<T>" required>
+  The service interface class
+</ParamField>
+
+<ParamField path="tags" type="Set<String>">
+  Optional tags for routing to specific workers
+</ParamField>
+
+<ParamField path="meta" type="Map<String, ByteArray>">
+  Optional metadata to attach to service calls
+</ParamField>
+
+<CodeGroup>
+```kotlin Kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  // Basic service stub
+  private val emailService = newService(EmailService::class.java)
+  
+  // Service with tags for routing
+  private val premiumService = newService(
+    EmailService::class.java,
+    tags = setOf("premium", "priority-high")
+  )
+  
+  // Service with metadata
+  private val trackedService = newService(
+    EmailService::class.java,
+    meta = mapOf("traceId" to "abc-123".toByteArray())
+  )
+}
+```
+
+```java Java
+public class MyWorkflowImpl extends Workflow implements MyWorkflow {
+  // Basic service stub
+  private final EmailService emailService = 
+      newService(EmailService.class);
+  
+  // Service with tags
+  private final EmailService premiumService = 
+      newService(
+          EmailService.class,
+          Set.of("premium", "priority-high"),
+          null
+      );
+  
+  // Service with metadata
+  private final EmailService trackedService = 
+      newService(
+          EmailService.class,
+          null,
+          Map.of("traceId", "abc-123".getBytes())
+      );
+}
+```
+</CodeGroup>
+
+### newWorkflow()
+
+Create a stub for calling another workflow (sub-workflow).
+
+```kotlin
+protected fun <T> newWorkflow(
+  klass: Class<out T>,
+  tags: Set<String>? = null,
+  meta: Map<String, ByteArray>? = null
+): T
+```
+
+<ParamField path="klass" type="Class<T>" required>
+  The workflow interface class
+</ParamField>
+
+<ParamField path="tags" type="Set<String>">
+  Optional tags for the workflow instance
+</ParamField>
+
+<ParamField path="meta" type="Map<String, ByteArray>">
+  Optional metadata for the workflow
+</ParamField>
+
+```kotlin
+class ParentWorkflow : Workflow(), ParentWorkflowInterface {
+  private val childWorkflow = newWorkflow(
+    ChildWorkflow::class.java,
+    tags = setOf("child-task"),
+    meta = mapOf("parentId" to workflowId.toByteArray())
+  )
+  
+  override fun execute() {
+    val result = childWorkflow.process()
+  }
+}
+```
+
+### getWorkflowById()
+
+Get a stub for an existing workflow instance by its ID.
+
+```kotlin
+protected fun <T : Any> getWorkflowById(
+  klass: Class<out T>,
+  id: String
+): T
+```
+
+<ParamField path="klass" type="Class<T>" required>
+  The workflow interface class
+</ParamField>
+
+<ParamField path="id" type="String" required>
+  The workflow instance ID
+</ParamField>
+
+```kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  override fun sendSignal(workflowId: String, message: String) {
+    val target = getWorkflowById(OtherWorkflow::class.java, workflowId)
+    target.signalChannel.send(message)
+  }
+}
+```
+
+### getWorkflowByTag()
+
+Get a stub for an existing workflow instance by its tag.
+
+```kotlin
+protected fun <T : Any> getWorkflowByTag(
+  klass: Class<out T>,
+  tag: String
+): T
+```
+
+<ParamField path="klass" type="Class<T>" required>
+  The workflow interface class
+</ParamField>
+
+<ParamField path="tag" type="String" required>
+  The workflow tag
+</ParamField>
+
+```kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  override fun notifyAdmin(message: String) {
+    val adminWorkflow = getWorkflowByTag(
+      NotificationWorkflow::class.java,
+      "admin-notifier"
+    )
+    adminWorkflow.notify(message)
+  }
+}
+```
+
+## Asynchronous Dispatch
+
+### dispatch()
+
+Dispatch a service or workflow method asynchronously, returning a `Deferred<R>` object.
+
+```kotlin
+// No parameters
+protected fun <R : Any?> dispatch(method: () -> R): Deferred<R>
+
+// With 1 parameter
+protected fun <P1, R : Any?> dispatch(
+  method: (p1: P1) -> R,
+  p1: P1
+): Deferred<R>
+
+// With 2 parameters
+protected fun <P1, P2, R : Any?> dispatch(
+  method: (p1: P1, p2: P2) -> R,
+  p1: P1,
+  p2: P2
+): Deferred<R>
+
+// ... up to 9 parameters
+```
+
+The `dispatch()` method has overloads for 0-9 parameters.
+
+<CodeGroup>
+```kotlin Kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  private val service = newService(MyService::class.java)
+  private val childWorkflow = newWorkflow(ChildWorkflow::class.java)
+  
+  override fun executeAsync() {
+    // Dispatch service call
+    val deferred1 = dispatch(service::processData, "input")
+    
+    // Dispatch workflow call
+    val deferred2 = dispatch(childWorkflow::calculate, 42, "param2")
+    
+    // Wait for results
+    val result1 = deferred1.await()
+    val result2 = deferred2.await()
+  }
+}
+```
+
+```java Java
+public class MyWorkflowImpl extends Workflow implements MyWorkflow {
+  private final MyService service = newService(MyService.class);
+  
+  @Override
+  public void executeAsync() {
+    // Dispatch service call with method reference
+    Deferred<String> deferred = dispatch(service::processData, "input");
+    
+    // Wait for result
+    String result = deferred.await();
+  }
+}
+```
+</CodeGroup>
+
+### dispatchVoid()
+
+Dispatch a service or workflow method that returns void asynchronously.
+
+```kotlin
+// No parameters
+protected fun dispatchVoid(method: Consumer0): Deferred<Void>
+
+// With 1 parameter
+protected fun <P1> dispatchVoid(
+  method: Consumer1<P1>,
+  p1: P1
+): Deferred<Void>
+
+// ... up to 9 parameters
+```
+
+```kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  private val notificationService = newService(NotificationService::class.java)
+  
+  override fun sendNotifications() {
+    // Dispatch void methods
+    val d1 = dispatchVoid(notificationService::sendEmail, "user@example.com")
+    val d2 = dispatchVoid(notificationService::sendSMS, "+1234567890")
+    
+    // Wait for completion
+    d1.await()
+    d2.await()
+  }
+}
+```
+
+## Channels
+
+### channel()
+
+Create a channel for receiving external signals.
+
+```kotlin
+protected fun <T : Any> channel(): Channel<T>
+```
+
+```kotlin
+interface MyWorkflow {
+  val statusChannel: SendChannel<String>
+  fun waitForApproval(): String
+}
+
+class MyWorkflowImpl : Workflow(), MyWorkflow {
+  override val statusChannel = channel<String>()
+  
+  override fun waitForApproval(): String {
+    val deferred = statusChannel.receive()
+    return deferred.await()
+  }
+}
+```
+
+See [Channels](/workflows/channels) for detailed usage.
+
+## Timers
+
+### timer(Duration)
+
+Create a timer that completes after a specified duration.
+
+```kotlin
+protected fun timer(duration: Duration): Deferred<Instant>
+```
+
+<ParamField path="duration" type="Duration" required>
+  The duration to wait (e.g., `Duration.ofSeconds(30)`)
+</ParamField>
+
+```kotlin
+import java.time.Duration
+
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  override fun processWithDelay() {
+    // Wait for 30 seconds
+    timer(Duration.ofSeconds(30)).await()
+    
+    // Continue processing
+    service.doWork()
+  }
+}
+```
+
+### timer(Instant)
+
+Create a timer that completes at a specific instant in time.
+
+```kotlin
+protected fun timer(instant: Instant): Deferred<Instant>
+```
+
+<ParamField path="instant" type="Instant" required>
+  The specific time to wait until
+</ParamField>
+
+```kotlin
+import java.time.Instant
+import java.time.Duration
+
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  override fun scheduleForLater(scheduledTime: Instant) {
+    // Wait until specific time
+    timer(scheduledTime).await()
+    
+    // Execute at scheduled time
+    service.executeScheduledTask()
+  }
+}
+```
+
+See [Timers](/workflows/timers) for detailed usage including racing timers with other operations.
+
+## Inline Tasks
+
+### inline()
+
+Execute a synchronous computation within the workflow.
+
+```kotlin
+protected fun <S> inline(task: () -> S): S
+```
+
+<ParamField path="task" type="() -> S" required>
+  A lambda containing the computation to run
+</ParamField>
+
+```kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  override fun calculateTotal(items: List<Item>): Double {
+    // Run calculation inline
+    return inline {
+      items.sumOf { it.price * it.quantity }
+    }
+  }
+  
+  override fun processData(data: List<String>): List<String> {
+    // Transform data inline
+    return inline {
+      data.filter { it.isNotEmpty() }
+          .map { it.uppercase() }
+          .sorted()
+    }
+  }
+}
+```
+
+### inlineVoid()
+
+Execute a synchronous computation that returns void.
+
+```kotlin
+protected fun inlineVoid(task: Consumer0): Unit
+```
+
+```kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  private var counter = 0
+  
+  override fun incrementCounter() {
+    inlineVoid {
+      counter++
+    }
+  }
+}
+```
+
+<Info>
+  **When to use inline()**
+  
+  Use `inline()` for:
+  - Pure computations (no side effects)
+  - Data transformations
+  - Simple business logic
+  
+  Do NOT use for:
+  - API calls (use services instead)
+  - Database operations (use services instead)
+  - File I/O (use services instead)
+</Info>
+
+## Context Properties
+
+These static properties provide information about the current workflow execution:
+
+### workflowName
+
+```kotlin
+val name: String = Workflow.workflowName
+```
+
+The name of the workflow class.
+
+### workflowId
+
+```kotlin
+val id: String = Workflow.workflowId
+```
+
+The unique ID of the current workflow instance.
+
+### methodName
+
+```kotlin
+val method: String = Workflow.methodName
+```
+
+The name of the currently executing workflow method.
+
+### methodId
+
+```kotlin
+val methodId: String = Workflow.methodId
+```
+
+The unique ID of the current method execution.
+
+### tags
+
+```kotlin
+val tags: Set<String> = Workflow.tags
+```
+
+The tags associated with the workflow instance.
+
+### meta
+
+```kotlin
+val meta: Map<String, ByteArray> = Workflow.meta
+```
+
+The metadata associated with the workflow instance.
+
+## Example: Using Multiple Methods
+
+```kotlin
+import io.infinitic.workflows.Workflow
+import java.time.Duration
+
+class OrderWorkflow : Workflow(), OrderWorkflowInterface {
+  private val paymentService = newService(PaymentService::class.java)
+  private val inventoryService = newService(InventoryService::class.java)
+  private val shippingService = newService(ShippingService::class.java)
+  
+  override val approvalChannel = channel<Boolean>()
+  
+  override fun processOrder(orderId: String): OrderResult {
+    // Dispatch inventory check asynchronously
+    val inventoryCheck = dispatch(inventoryService::checkStock, orderId)
+    
+    // Calculate total inline
+    val items = inventoryCheck.await()
+    val total = inline {
+      items.sumOf { it.price * it.quantity }
+    }
+    
+    // Wait for approval with timeout
+    val approvalDeferred = approvalChannel.receive()
+    val timeout = timer(Duration.ofMinutes(5))
+    
+    val approved = when ((approvalDeferred or timeout).await()) {
+      is Boolean -> approvalDeferred.await()
+      else -> false
+    }
+    
+    if (!approved) {
+      throw OrderNotApprovedException(orderId)
+    }
+    
+    // Process payment and shipping in parallel
+    val paymentDeferred = dispatch(paymentService::charge, orderId, total)
+    val shippingDeferred = dispatch(shippingService::schedulePickup, orderId)
+    
+    val payment = paymentDeferred.await()
+    val tracking = shippingDeferred.await()
+    
+    return OrderResult(orderId, payment, tracking)
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Calling Services" icon="server" href="/workflows/calling-services">
+    Learn how to call services from workflows
+  </Card>
+  <Card title="Sub-workflows" icon="sitemap" href="/workflows/sub-workflows">
+    Use workflows within workflows
+  </Card>
+  <Card title="Channels" icon="tower-broadcast" href="/workflows/channels">
+    Receive external signals
+  </Card>
+  <Card title="Timers" icon="timer" href="/workflows/timers">
+    Work with timers and delays
+  </Card>
+</CardGroup>

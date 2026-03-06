@@ -1,0 +1,455 @@
+---
+title: Pulsar Transport
+description: Configure Apache Pulsar as the message transport layer for Infinitic
+---
+
+Infinitic uses Apache Pulsar as its distributed messaging transport layer. Pulsar provides reliable, scalable message delivery between workers, clients, and the orchestration engine.
+
+## Overview
+
+Pulsar acts as the backbone for all communication in Infinitic:
+- Task dispatching and execution
+- Workflow state transitions
+- Event notifications
+- Worker coordination
+
+The transport configuration is defined in your YAML configuration file under the `transport.pulsar` section.
+
+## Basic Configuration
+
+Here's a minimal Pulsar configuration for local development:
+
+```yaml
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://localhost:6650/
+    webServiceUrl: http://localhost:8080
+    tenant: infinitic
+    namespace: dev
+```
+
+### Required Parameters
+
+<ParamField path="brokerServiceUrl" type="string" required>
+  Pulsar broker service URL. Must start with `pulsar://` or `pulsar+ssl://`.
+  
+  **Example:** `pulsar://localhost:6650/`
+</ParamField>
+
+<ParamField path="webServiceUrl" type="string" required>
+  Pulsar HTTP admin service URL. Must start with `http://` or `https://`.
+  
+  **Example:** `http://localhost:8080`
+</ParamField>
+
+<ParamField path="tenant" type="string" required>
+  Pulsar tenant name. Cannot be blank.
+  
+  **Example:** `infinitic`
+</ParamField>
+
+<ParamField path="namespace" type="string" required>
+  Pulsar namespace within the tenant. Cannot be blank.
+  
+  **Example:** `production`
+</ParamField>
+
+## Client Configuration
+
+Configure the Pulsar client connection behavior:
+
+```yaml
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://pulsar.example.com:6650/
+    webServiceUrl: https://pulsar.example.com:8443
+    tenant: infinitic
+    namespace: production
+    client:
+      ioThreads: 10
+      listenerThreads: 5
+      connectionsPerBroker: 2
+      operationTimeoutSeconds: 30
+      connectionTimeoutSeconds: 10
+      keepAliveIntervalSeconds: 30
+      memoryLimitMB: 512
+```
+
+### Key Client Parameters
+
+<ParamField path="client.ioThreads" type="integer">
+  Number of threads for handling connections to brokers.
+  
+  **Default:** Pulsar client default (1 thread per core)
+</ParamField>
+
+<ParamField path="client.listenerThreads" type="integer">
+  Number of threads for message listeners.
+  
+  **Default:** Pulsar client default
+</ParamField>
+
+<ParamField path="client.connectionsPerBroker" type="integer">
+  Number of connections established per broker.
+  
+  **Default:** 1
+</ParamField>
+
+<ParamField path="client.operationTimeoutSeconds" type="number">
+  Timeout for producer/consumer operations in seconds.
+  
+  **Default:** 30
+</ParamField>
+
+<ParamField path="client.connectionTimeoutSeconds" type="number">
+  Timeout for establishing broker connections in seconds.
+  
+  **Default:** 10
+</ParamField>
+
+<ParamField path="client.memoryLimitMB" type="integer">
+  Maximum memory used by the client in megabytes.
+  
+  **Default:** 64 MB
+</ParamField>
+
+## Consumer Configuration
+
+Configure message consumption behavior:
+
+```yaml
+transport:
+  pulsar:
+    # ... other config
+    consumer:
+      receiverQueueSize: 1000
+      ackTimeoutSeconds: 30
+      negativeAckRedeliveryDelaySeconds: 60
+      maxRedeliverCount: 3
+      acknowledgmentGroupTimeSeconds: 0.1
+```
+
+### Consumer Parameters
+
+<ParamField path="consumer.receiverQueueSize" type="integer">
+  Size of the consumer receive queue. Higher values increase throughput but use more memory.
+  
+  **Default:** 1000
+</ParamField>
+
+<ParamField path="consumer.ackTimeoutSeconds" type="number">
+  Timeout for message acknowledgment in seconds.
+  
+  **Default:** 0 (disabled)
+</ParamField>
+
+<ParamField path="consumer.negativeAckRedeliveryDelaySeconds" type="number">
+  Delay before redelivering negatively acknowledged messages.
+  
+  **Default:** 60 seconds
+</ParamField>
+
+<ParamField path="consumer.maxRedeliverCount" type="integer">
+  Maximum number of times a message will be redelivered before being sent to dead letter queue.
+  
+  **Default:** 3
+</ParamField>
+
+## Producer Configuration
+
+Configure message production behavior:
+
+```yaml
+transport:
+  pulsar:
+    # ... other config
+    producer:
+      sendTimeoutSeconds: 30
+      blockIfQueueFull: true
+      enableBatching: true
+      batchingMaxMessages: 1000
+      batchingMaxPublishDelaySeconds: 1
+      compressionType: LZ4
+```
+
+### Producer Parameters
+
+<ParamField path="producer.sendTimeoutSeconds" type="number">
+  Timeout for send operations in seconds.
+  
+  **Default:** 30
+</ParamField>
+
+<ParamField path="producer.blockIfQueueFull" type="boolean">
+  Whether to block send operations when the producer queue is full.
+  
+  **Default:** true
+</ParamField>
+
+<ParamField path="producer.enableBatching" type="boolean">
+  Enable message batching for better throughput.
+  
+  **Default:** true
+</ParamField>
+
+<ParamField path="producer.compressionType" type="string">
+  Compression algorithm for messages. Options: `NONE`, `LZ4`, `ZLIB`, `ZSTD`, `SNAPPY`.
+  
+  **Default:** NONE
+</ParamField>
+
+## Authentication
+
+### Token Authentication
+
+Use JWT tokens for authentication:
+
+```yaml
+transport:
+  pulsar:
+    # ... other config
+    client:
+      authentication:
+        token: "eyJhbGciOiJIUzI1NiJ9..."
+```
+
+### OAuth2 Authentication
+
+For OAuth2 authentication (e.g., with Auth0, Okta):
+
+```yaml
+transport:
+  pulsar:
+    # ... other config
+    client:
+      authentication:
+        issuerUrl: https://auth.example.com
+        privateKey: file:///path/to/credentials.json
+        audience: urn:sn:pulsar:infinitic:production
+```
+
+## TLS/SSL Configuration
+
+Enable secure connections:
+
+```yaml
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar+ssl://pulsar.example.com:6651/
+    webServiceUrl: https://pulsar.example.com:8443
+    tenant: infinitic
+    namespace: production
+    client:
+      tlsTrustCertsFilePath: /path/to/ca-cert.pem
+      tlsKeyFilePath: /path/to/client-key.pem
+      tlsCertificateFilePath: /path/to/client-cert.pem
+      enableTlsHostnameVerification: true
+      allowTlsInsecureConnection: false
+```
+
+### TLS Parameters
+
+<ParamField path="client.tlsTrustCertsFilePath" type="string">
+  Path to trusted CA certificates file.
+</ParamField>
+
+<ParamField path="client.tlsKeyFilePath" type="string">
+  Path to client private key file.
+</ParamField>
+
+<ParamField path="client.tlsCertificateFilePath" type="string">
+  Path to client certificate file.
+</ParamField>
+
+<ParamField path="client.enableTlsHostnameVerification" type="boolean">
+  Enable hostname verification for TLS connections.
+  
+  **Default:** false
+</ParamField>
+
+<ParamField path="client.allowTlsInsecureConnection" type="boolean">
+  Allow insecure TLS connections (useful for testing).
+  
+  **Default:** false
+</ParamField>
+
+## Pulsar Policies
+
+Configure namespace policies for topics:
+
+```yaml
+transport:
+  pulsar:
+    # ... other config
+    policies:
+      messageTTLSeconds: 86400
+      retentionTimeMinutes: 10080
+      retentionSizeMB: 1024
+```
+
+<ParamField path="policies.messageTTLSeconds" type="integer">
+  Time-to-live for messages in seconds (24 hours in example).
+</ParamField>
+
+<ParamField path="policies.retentionTimeMinutes" type="integer">
+  Retention time for acknowledged messages in minutes (7 days in example).
+</ParamField>
+
+<ParamField path="policies.retentionSizeMB" type="integer">
+  Maximum retention size in megabytes.
+</ParamField>
+
+## Production Configuration Example
+
+Complete production-ready configuration:
+
+```yaml
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar+ssl://pulsar-prod.example.com:6651/
+    webServiceUrl: https://pulsar-prod.example.com:8443
+    tenant: infinitic
+    namespace: production
+    
+    client:
+      # Authentication
+      authentication:
+        issuerUrl: https://auth.example.com
+        privateKey: file:///etc/infinitic/credentials.json
+        audience: urn:sn:pulsar:infinitic:production
+      
+      # TLS
+      tlsTrustCertsFilePath: /etc/ssl/certs/ca-bundle.crt
+      enableTlsHostnameVerification: true
+      allowTlsInsecureConnection: false
+      
+      # Performance
+      ioThreads: 16
+      listenerThreads: 8
+      connectionsPerBroker: 3
+      memoryLimitMB: 1024
+      
+      # Timeouts
+      operationTimeoutSeconds: 30
+      connectionTimeoutSeconds: 10
+      keepAliveIntervalSeconds: 30
+    
+    consumer:
+      receiverQueueSize: 1000
+      ackTimeoutSeconds: 60
+      negativeAckRedeliveryDelaySeconds: 30
+      maxRedeliverCount: 3
+      acknowledgmentGroupTimeSeconds: 0.1
+    
+    producer:
+      sendTimeoutSeconds: 30
+      blockIfQueueFull: true
+      enableBatching: true
+      batchingMaxMessages: 1000
+      batchingMaxPublishDelaySeconds: 1
+      compressionType: ZSTD
+    
+    policies:
+      messageTTLSeconds: 86400
+      retentionTimeMinutes: 10080
+      retentionSizeMB: 2048
+```
+
+## Configuration via Code
+
+You can also configure Pulsar programmatically:
+
+<CodeGroup>
+```kotlin Kotlin
+import io.infinitic.pulsar.config.PulsarConfig
+import io.infinitic.pulsar.config.PulsarClientConfig
+import io.infinitic.pulsar.config.auth.AuthenticationTokenConfig
+
+val config = PulsarConfig(
+    brokerServiceUrl = "pulsar://localhost:6650/",
+    webServiceUrl = "http://localhost:8080",
+    tenant = "infinitic",
+    namespace = "production",
+    client = PulsarClientConfig(
+        ioThreads = 10,
+        authentication = AuthenticationTokenConfig(
+            token = Secret("your-token-here")
+        )
+    )
+)
+```
+
+```java Java
+import io.infinitic.pulsar.config.PulsarConfig;
+import io.infinitic.pulsar.config.PulsarClientConfig;
+import io.infinitic.pulsar.config.auth.AuthenticationTokenConfig;
+import com.sksamuel.hoplite.Secret;
+
+PulsarClientConfig clientConfig = PulsarClientConfig.builder()
+    .setIoThreads(10)
+    .setAuthentication(
+        AuthenticationTokenConfig.builder()
+            .token("your-token-here")
+            .build()
+    )
+    .build();
+
+PulsarConfig config = new PulsarConfig(
+    "pulsar://localhost:6650/",
+    "http://localhost:8080",
+    "infinitic",
+    "production",
+    null, // allowedClusters
+    null, // adminRoles
+    clientConfig,
+    new PoliciesConfig(),
+    new PulsarProducerConfig(),
+    new PulsarConsumerConfig()
+);
+```
+</CodeGroup>
+
+## Troubleshooting
+
+### Connection Issues
+
+If you're experiencing connection problems:
+
+1. Verify broker URLs are correct and accessible
+2. Check firewall rules allow connections to Pulsar ports
+3. Verify authentication credentials are valid
+4. Check TLS certificates are not expired
+
+### Performance Tuning
+
+For high-throughput scenarios:
+
+- Increase `ioThreads` and `connectionsPerBroker`
+- Enable producer batching with appropriate batch sizes
+- Use compression (LZ4 or ZSTD) for large messages
+- Increase `memoryLimitMB` if memory permits
+- Tune `receiverQueueSize` based on message size and rate
+
+### Message Redelivery
+
+If messages are being redelivered excessively:
+
+- Increase `ackTimeoutSeconds` for long-running tasks
+- Adjust `negativeAckRedeliveryDelaySeconds` to give tasks more time
+- Check worker health and processing capacity
+- Review `maxRedeliverCount` setting
+
+## Best Practices
+
+1. **Use SSL/TLS in production** - Always encrypt traffic with `pulsar+ssl://`
+2. **Enable authentication** - Use token or OAuth2 authentication
+3. **Monitor memory usage** - Set appropriate `memoryLimitMB` limits
+4. **Use separate namespaces** - Isolate environments (dev, staging, production)
+5. **Configure dead letter queues** - Set `maxRedeliverCount` appropriately
+6. **Enable compression** - Use ZSTD for best compression ratio
+7. **Tune for your workload** - Adjust batch sizes and queue sizes based on message patterns
+
+## Next Steps
+
+- [Storage Backends](/infrastructure/storage-backends) - Configure persistent storage
+- [Deployment](/infrastructure/deployment) - Deploy Infinitic to production

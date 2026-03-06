@@ -1,0 +1,437 @@
+---
+title: Defining Services
+description: Learn how to create service interfaces and implementations in Infinitic
+---
+
+## Service Structure
+
+Infinitic services consist of two parts:
+
+1. **Interface**: Defines the service contract
+2. **Implementation**: Contains the actual business logic
+
+This separation allows clients and workflows to interact with services through interfaces while workers execute the actual implementations.
+
+## Creating a Service Interface
+
+A service interface is a standard Java or Kotlin interface:
+
+```kotlin
+interface EmailService {
+  fun sendEmail(to: String, subject: String, body: String): Boolean
+  fun sendBulkEmails(emails: List<EmailData>): Map<String, Boolean>
+}
+
+data class EmailData(
+  val to: String,
+  val subject: String,
+  val body: String
+)
+```
+
+### Supported Method Signatures
+
+Service methods can:
+
+- Accept any serializable parameters (primitives, data classes, collections, etc.)
+- Return any serializable value
+- Return `void`/`Unit` for fire-and-forget operations
+- Throw exceptions (which trigger retry mechanisms)
+
+```kotlin
+interface DataProcessingService {
+  // Returns a value
+  fun processData(data: String): ProcessedResult
+  
+  // Returns void
+  fun logEvent(event: Event)
+  
+  // Multiple parameters
+  fun transform(input: String, config: Config, metadata: Map<String, Any>): String
+  
+  // Collections
+  fun processItems(items: List<Item>): List<Result>
+  
+  // Can throw exceptions
+  fun validateAndStore(data: Data): Boolean  // throws ValidationException
+}
+```
+
+## Implementing a Service
+
+The implementation provides the actual business logic:
+
+```kotlin
+class EmailServiceImpl : EmailService {
+  
+  override fun sendEmail(to: String, subject: String, body: String): Boolean {
+    return try {
+      // Use your email provider
+      val provider = EmailProvider.getInstance()
+      provider.send(to, subject, body)
+      true
+    } catch (e: Exception) {
+      // Exception will trigger retry
+      throw e
+    }
+  }
+  
+  override fun sendBulkEmails(emails: List<EmailData>): Map<String, Boolean> {
+    return emails.associate { email ->
+      email.to to sendEmail(email.to, email.subject, email.body)
+    }
+  }
+}
+```
+
+### Constructor Dependencies
+
+Services can accept dependencies through their constructor:
+
+```kotlin
+class EmailServiceImpl(
+  private val emailProvider: EmailProvider,
+  private val logger: Logger,
+  private val config: EmailConfig
+) : EmailService {
+  
+  override fun sendEmail(to: String, subject: String, body: String): Boolean {
+    logger.info("Sending email to $to")
+    return emailProvider.send(
+      to = to,
+      subject = subject,
+      body = body,
+      from = config.defaultSender
+    )
+  }
+}
+```
+
+Provide dependencies in the worker configuration:
+
+```kotlin
+val worker = InfiniticWorker.builder()
+  .setTransport(transport)
+  .addService(
+    name = "emailService",
+    factory = {
+      EmailServiceImpl(
+        emailProvider = MyEmailProvider(),
+        logger = LoggerFactory.getLogger("email"),
+        config = EmailConfig.load()
+      )
+    },
+    concurrency = 10
+  )
+  .build()
+```
+
+## Custom Naming with @Name
+
+By default, Infinitic uses the fully qualified interface name as the service name. Use the `@Name` annotation to customize:
+
+```kotlin
+import io.infinitic.annotations.Name
+
+@Name("email")
+interface EmailService {
+  fun sendEmail(to: String, subject: String, body: String): Boolean
+}
+```
+
+You can also rename individual methods:
+
+```kotlin
+interface EmailService {
+  
+  @Name("send")
+  fun sendEmail(to: String, subject: String, body: String): Boolean
+  
+  @Name("bulk_send")
+  fun sendBulkEmails(emails: List<EmailData>): Map<String, Boolean>
+}
+```
+
+<Note>
+When using `@Name`, ensure the name matches across your client, workflow, and worker configurations.
+</Note>
+
+## Service Annotations
+
+Infinitic provides several annotations to control service behavior:
+
+### @Retry
+
+Define retry behavior at the class or method level:
+
+```kotlin
+import io.infinitic.annotations.Retry
+import io.infinitic.tasks.WithRetry
+
+class ExponentialBackoff : WithRetry {
+  override fun getSecondsBeforeRetry(retry: Int, e: Exception): Double? {
+    // Retry up to 5 times with exponential backoff
+    return if (retry < 5) Math.pow(2.0, retry.toDouble()) else null
+  }
+}
+
+@Retry(ExponentialBackoff::class)
+class EmailServiceImpl : EmailService {
+  // All methods use ExponentialBackoff by default
+  
+  override fun sendEmail(to: String, subject: String, body: String): Boolean {
+    // Implementation
+  }
+}
+```
+
+Override retry behavior for specific methods:
+
+```kotlin
+class NoRetry : WithRetry {
+  override fun getSecondsBeforeRetry(retry: Int, e: Exception): Double? = null
+}
+
+@Retry(ExponentialBackoff::class)
+class EmailServiceImpl : EmailService {
+  
+  // Uses class-level ExponentialBackoff
+  override fun sendEmail(to: String, subject: String, body: String): Boolean {
+    // Implementation
+  }
+  
+  // No retry for validation
+  @Retry(NoRetry::class)
+  override fun validateEmail(email: String): Boolean {
+    // Implementation
+  }
+}
+```
+
+### @Timeout
+
+Set timeout durations for task execution:
+
+```kotlin
+import io.infinitic.annotations.Timeout
+import io.infinitic.tasks.WithTimeout
+
+class ThirtySecondTimeout : WithTimeout {
+  override fun getTimeoutSeconds(): Double = 30.0
+}
+
+class EmailServiceImpl : EmailService {
+  
+  @Timeout(ThirtySecondTimeout::class)
+  override fun sendEmail(to: String, subject: String, body: String): Boolean {
+    // Will timeout after 30 seconds
+  }
+}
+```
+
+You can also specify a grace period:
+
+```kotlin
+class TimeoutWithGrace : WithTimeout {
+  override fun getTimeoutSeconds(): Double = 30.0
+  
+  // Allow 5 seconds to clean up after timeout
+  override fun getGracePeriodAfterTimeoutSeconds(): Double = 5.0
+}
+```
+
+### @Batch
+
+Process multiple tasks together for improved performance:
+
+```kotlin
+import io.infinitic.annotations.Batch
+
+class EmailServiceImpl : EmailService {
+  
+  // Regular method signature
+  override fun sendEmail(to: String, subject: String, body: String): Boolean {
+    throw NotImplementedError("Use batch method")
+  }
+  
+  // Batch implementation receives a map of task IDs to inputs
+  @Batch
+  fun sendEmail(batch: Map<String, Input>): Map<String, Boolean> {
+    // Process all emails in a single operation
+    return batch.mapValues { (taskId, input) ->
+      emailProvider.send(input.to, input.subject, input.body)
+    }
+  }
+  
+  data class Input(val to: String, val subject: String, val body: String)
+}
+```
+
+[Learn more about batching →](/services/batching)
+
+### @Delegated
+
+Delegate task completion to external systems:
+
+```kotlin
+import io.infinitic.annotations.Delegated
+import io.infinitic.tasks.Task
+
+class EmailServiceImpl : EmailService {
+  
+  @Delegated
+  override fun sendEmail(to: String, subject: String, body: String): Boolean {
+    val taskId = Task.taskId
+    val serviceName = Task.serviceName
+    
+    // Send to external system
+    externalEmailSystem.sendAsync(to, subject, body) { success ->
+      // External system will call completeTask when done
+      Task.client.completeTask(serviceName, taskId, success)
+    }
+    
+    // Return value is ignored for delegated tasks
+    return true
+  }
+}
+```
+
+[Learn more about delegated tasks →](/services/delegated-tasks)
+
+## Inheritance and Composition
+
+Services can use inheritance and composition:
+
+```kotlin
+interface BaseService {
+  fun commonOperation(): String
+}
+
+interface EmailService : BaseService {
+  fun sendEmail(to: String, subject: String, body: String): Boolean
+}
+
+class EmailServiceImpl : EmailService {
+  
+  override fun commonOperation(): String {
+    return "common"
+  }
+  
+  override fun sendEmail(to: String, subject: String, body: String): Boolean {
+    // Implementation
+  }
+}
+```
+
+## Testing Services
+
+Services can be tested like regular classes:
+
+```kotlin
+import io.infinitic.tasks.Task
+import org.junit.jupiter.api.Test
+import kotlin.test.assertEquals
+
+class EmailServiceTest {
+  
+  @Test
+  fun `test sendEmail`() {
+    val service = EmailServiceImpl(
+      emailProvider = MockEmailProvider(),
+      logger = MockLogger(),
+      config = TestEmailConfig()
+    )
+    
+    val result = service.sendEmail(
+      to = "test@example.com",
+      subject = "Test",
+      body = "Test body"
+    )
+    
+    assertEquals(true, result)
+  }
+  
+  @Test
+  fun `test with task context`() {
+    // Set up task context for testing
+    val mockContext = MockTaskContext()
+    Task.setContext(mockContext)
+    
+    val service = EmailServiceImpl()
+    service.sendEmail("test@example.com", "Test", "Body")
+    
+    // Verify task context was used correctly
+  }
+}
+```
+
+## Best Practices
+
+### Keep Services Focused
+
+Each service should have a single responsibility:
+
+```kotlin
+// ✅ Good: Focused service
+interface EmailService {
+  fun sendEmail(to: String, subject: String, body: String): Boolean
+  fun sendBulkEmails(emails: List<EmailData>): Map<String, Boolean>
+}
+
+// ❌ Bad: Too many responsibilities
+interface NotificationService {
+  fun sendEmail(to: String, subject: String, body: String): Boolean
+  fun sendSMS(phone: String, message: String): Boolean
+  fun sendPushNotification(deviceId: String, message: String): Boolean
+  fun saveToDatabase(data: Any): Boolean
+  fun callExternalAPI(endpoint: String): String
+}
+```
+
+### Use Meaningful Return Types
+
+Return values that provide useful information:
+
+```kotlin
+// ✅ Good: Informative return type
+data class EmailResult(
+  val success: Boolean,
+  val messageId: String?,
+  val error: String?
+)
+
+fun sendEmail(to: String, subject: String, body: String): EmailResult
+
+// ❌ Less useful: Just boolean
+fun sendEmail(to: String, subject: String, body: String): Boolean
+```
+
+### Document Complex Behavior
+
+Use KDoc or JavaDoc to document non-obvious behavior:
+
+```kotlin
+interface EmailService {
+  /**
+   * Sends an email to the specified recipient.
+   * 
+   * @param to Recipient email address
+   * @param subject Email subject line
+   * @param body Email body (supports HTML)
+   * @return EmailResult containing success status and message ID
+   * @throws InvalidEmailException if the email address is malformed
+   */
+  fun sendEmail(to: String, subject: String, body: String): EmailResult
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Service Context" icon="layer-group" href="/services/service-context">
+    Access task metadata and workflow information
+  </Card>
+  <Card title="Batching" icon="layer-group" href="/services/batching">
+    Process multiple tasks efficiently
+  </Card>
+</CardGroup>

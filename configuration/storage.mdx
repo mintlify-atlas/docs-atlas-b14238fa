@@ -1,0 +1,575 @@
+---
+title: Storage Configuration
+description: Configure state storage for Infinitic workflows using PostgreSQL, Redis, or in-memory storage
+---
+
+Infinitic requires storage to persist workflow state, workflow tags, and service tags. Storage configuration is required for workers that run workflow state engines or tag engines.
+
+## Available Storage Backends
+
+Infinitic supports three storage implementations:
+
+- **PostgreSQL** - Production-ready relational database (recommended)
+- **Redis** - High-performance key-value store
+- **InMemory** - Local development and testing
+
+## PostgreSQL Storage
+
+PostgreSQL is the recommended storage backend for production deployments.
+
+### YAML Configuration
+
+#### Basic Configuration
+
+```yaml
+storage:
+  postgres:
+    host: localhost
+    port: 5432
+    username: postgres
+    password: password
+```
+
+#### Complete Configuration
+
+```yaml
+storage:
+  postgres:
+    host: postgres.example.com
+    port: 5432
+    username: infinitic
+    password: ${DB_PASSWORD}
+    database: infinitic
+    schema: public
+    keySetTable: key_set_storage
+    keyValueTable: key_value_storage
+    maximumPoolSize: 10
+    minimumIdle: 5
+    idleTimeout: 600000
+    connectionTimeout: 30000
+    maxLifetime: 1800000
+    
+    compression:
+      mode: gzip  # or none
+    
+    cache:
+      keyValue:
+        maximumSize: 10000
+        expireAfterAccess: 3600
+        expireAfterWrite: 7200
+      keySet:
+        maximumSize: 10000
+        expireAfterAccess: 3600
+        expireAfterWrite: 7200
+```
+
+### Builder Pattern
+
+```java
+import io.infinitic.storage.config.PostgresStorageConfig;
+import io.infinitic.storage.compression.CompressionConfig;
+import io.infinitic.cache.config.CacheConfig;
+
+PostgresStorageConfig storage = PostgresStorageConfig.builder()
+    .setHost("localhost")
+    .setPort(5432)
+    .setUsername("postgres")
+    .setPassword("password")
+    .setDatabase("infinitic")
+    .setSchema("public")
+    .setKeySetTable("key_set_storage")
+    .setKeyValueTable("key_value_storage")
+    .setMaximumPoolSize(10)
+    .setMinimumIdle(5)
+    .setIdleTimeout(600000L)
+    .setConnectionTimeout(30000L)
+    .setMaxLifetime(1800000L)
+    .build();
+```
+
+### Configuration Options
+
+#### Connection Settings
+
+| Option | Type | Required | Default | Description |
+|--------|------|----------|---------|-------------|
+| `host` | String | Yes | - | PostgreSQL host |
+| `port` | Integer | Yes | - | PostgreSQL port |
+| `username` | String | Yes | - | Database username |
+| `password` | String | No | null | Database password |
+| `database` | String | No | infinitic | Database name |
+| `schema` | String | No | public | Schema name |
+| `keySetTable` | String | No | key_set_storage | Table for key sets |
+| `keyValueTable` | String | No | key_value_storage | Table for key-value pairs |
+
+#### Connection Pool Settings
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `maximumPoolSize` | Integer | 10 | Maximum number of connections in pool |
+| `minimumIdle` | Integer | same as max | Minimum idle connections in pool |
+| `idleTimeout` | Long | 600000 | Idle timeout in milliseconds (10 minutes) |
+| `connectionTimeout` | Long | 30000 | Connection timeout in milliseconds (30 seconds) |
+| `maxLifetime` | Long | 1800000 | Maximum connection lifetime in milliseconds (30 minutes) |
+
+### Database Setup
+
+Infinitic automatically creates required tables on first use. You can also create them manually:
+
+```sql
+-- Key-value storage table
+CREATE TABLE IF NOT EXISTS key_value_storage (
+    key VARCHAR(255) PRIMARY KEY,
+    value BYTEA NOT NULL
+);
+
+-- Key-set storage table
+CREATE TABLE IF NOT EXISTS key_set_storage (
+    key VARCHAR(255) NOT NULL,
+    value VARCHAR(255) NOT NULL,
+    PRIMARY KEY (key, value)
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_key_set_key ON key_set_storage(key);
+```
+
+### Performance Tuning
+
+#### High Concurrency
+
+```yaml
+storage:
+  postgres:
+    host: postgres.example.com
+    port: 5432
+    username: infinitic
+    password: ${DB_PASSWORD}
+    maximumPoolSize: 50
+    minimumIdle: 25
+    connectionTimeout: 10000
+    compression:
+      mode: gzip
+    cache:
+      keyValue:
+        maximumSize: 50000
+        expireAfterAccess: 1800
+      keySet:
+        maximumSize: 50000
+        expireAfterAccess: 1800
+```
+
+## Redis Storage
+
+Redis provides high-performance key-value storage.
+
+### YAML Configuration
+
+#### Basic Configuration
+
+```yaml
+storage:
+  redis:
+    host: localhost
+    port: 6379
+```
+
+#### Complete Configuration
+
+```yaml
+storage:
+  redis:
+    host: redis.example.com
+    port: 6379
+    username: infinitic
+    password: ${REDIS_PASSWORD}
+    database: 0
+    timeout: 2000
+    ssl: true
+    
+    poolConfig:
+      maxTotal: 50
+      maxIdle: 25
+      minIdle: 10
+      maxWaitMillis: 3000
+      testOnBorrow: true
+      testOnReturn: false
+      testWhileIdle: true
+    
+    compression:
+      mode: gzip
+    
+    cache:
+      keyValue:
+        maximumSize: 10000
+        expireAfterAccess: 3600
+      keySet:
+        maximumSize: 10000
+        expireAfterAccess: 3600
+```
+
+### Builder Pattern
+
+```java
+import io.infinitic.storage.config.RedisStorageConfig;
+import io.infinitic.storage.config.RedisConfig.PoolConfig;
+
+RedisStorageConfig storage = RedisStorageConfig.builder()
+    .setHost("localhost")
+    .setPort(6379)
+    .setUsername("infinitic")
+    .setPassword("password")
+    .setDatabase(0)
+    .setTimeout(2000)
+    .setSsl(true)
+    .setPoolConfig(
+        PoolConfig.builder()
+            .setMaxTotal(50)
+            .setMaxIdle(25)
+            .setMinIdle(10)
+            .setMaxWaitMillis(3000)
+            .build()
+    )
+    .build();
+```
+
+### Configuration Options
+
+#### Connection Settings
+
+| Option | Type | Required | Default | Description |
+|--------|------|----------|---------|-------------|
+| `host` | String | Yes | - | Redis host |
+| `port` | Integer | Yes | - | Redis port |
+| `username` | String | No | null | Redis username (Redis 6+) |
+| `password` | String | No | null | Redis password |
+| `database` | Integer | No | 0 | Redis database number |
+| `timeout` | Integer | No | 2000 | Connection timeout in milliseconds |
+| `ssl` | Boolean | No | false | Enable SSL/TLS |
+
+#### Connection Pool Settings
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `maxTotal` | Integer | 8 | Maximum total connections |
+| `maxIdle` | Integer | 8 | Maximum idle connections |
+| `minIdle` | Integer | 0 | Minimum idle connections |
+| `maxWaitMillis` | Long | -1 | Maximum wait time for connection |
+| `testOnBorrow` | Boolean | false | Test connection on borrow |
+| `testOnReturn` | Boolean | false | Test connection on return |
+| `testWhileIdle` | Boolean | false | Test idle connections |
+
+### Redis Cluster
+
+For Redis Cluster deployments, configure multiple hosts:
+
+```yaml
+storage:
+  redis:
+    host: redis-1.example.com,redis-2.example.com,redis-3.example.com
+    port: 6379
+    password: ${REDIS_PASSWORD}
+    ssl: true
+```
+
+## InMemory Storage
+
+InMemory storage is ideal for local development, testing, and single-process applications.
+
+### YAML Configuration
+
+```yaml
+storage:
+  inMemory: {}
+```
+
+Or with optional settings:
+
+```yaml
+storage:
+  inMemory:
+    compression:
+      mode: none
+    cache:
+      keyValue:
+        maximumSize: 1000
+      keySet:
+        maximumSize: 1000
+```
+
+### Programmatic Configuration
+
+```java
+import io.infinitic.storage.config.InMemoryStorageConfig;
+
+InMemoryStorageConfig storage = InMemoryStorageConfig.builder()
+    .build();
+```
+
+### Use Cases
+
+#### Unit Testing
+
+```yaml
+# test-config.yml
+transport:
+  inMemory: {}
+
+storage:
+  inMemory: {}
+
+workflows:
+  - name: TestWorkflow
+    executor:
+      class: com.example.TestWorkflow
+      concurrency: 1
+    stateEngine:
+      concurrency: 1
+```
+
+#### Local Development
+
+```yaml
+# dev-config.yml
+transport:
+  inMemory:
+    shutdownGracePeriodSeconds: 5.0
+
+storage:
+  inMemory: {}
+
+services:
+  - name: MyService
+    executor:
+      class: com.example.MyServiceImpl
+      concurrency: 1
+
+workflows:
+  - name: MyWorkflow
+    executor:
+      class: com.example.MyWorkflowImpl
+      concurrency: 1
+    stateEngine:
+      concurrency: 1
+```
+
+## Compression
+
+Compression reduces storage size and network bandwidth at the cost of CPU usage.
+
+### Configuration
+
+```yaml
+storage:
+  postgres:  # or redis
+    # ... connection settings ...
+    compression:
+      mode: gzip  # or none
+```
+
+### Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `none` | No compression | Small state, CPU-constrained |
+| `gzip` | GZIP compression | Large state, network-constrained |
+
+### Trade-offs
+
+- **GZIP compression**:
+  - Reduces storage by 60-90%
+  - Reduces network bandwidth
+  - Increases CPU usage by 10-20%
+  - Recommended for most use cases
+
+- **No compression**:
+  - No CPU overhead
+  - Higher storage costs
+  - Higher network usage
+  - Use for very small state objects
+
+## Caching
+
+Caching reduces database load and improves performance.
+
+### Configuration
+
+```yaml
+storage:
+  postgres:  # or redis
+    # ... connection settings ...
+    cache:
+      keyValue:
+        maximumSize: 10000
+        expireAfterAccess: 3600
+        expireAfterWrite: 7200
+      keySet:
+        maximumSize: 10000
+        expireAfterAccess: 3600
+        expireAfterWrite: 7200
+```
+
+### Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `maximumSize` | Long | Maximum number of cached entries |
+| `expireAfterAccess` | Long | Expire entries after access (seconds) |
+| `expireAfterWrite` | Long | Expire entries after write (seconds) |
+
+### Best Practices
+
+- **Enable caching** - Significantly reduces database load
+- **Size appropriately** - Balance memory usage vs hit rate
+- **Tune expiration** - Longer = better hit rate, more stale data
+- **Monitor hit rate** - Adjust size if hit rate is low
+
+### Cache Sizing
+
+```yaml
+# Small deployment (< 1000 workflows)
+cache:
+  keyValue:
+    maximumSize: 1000
+    expireAfterAccess: 600
+  keySet:
+    maximumSize: 1000
+    expireAfterAccess: 600
+
+# Medium deployment (< 10,000 workflows)
+cache:
+  keyValue:
+    maximumSize: 10000
+    expireAfterAccess: 1800
+  keySet:
+    maximumSize: 10000
+    expireAfterAccess: 1800
+
+# Large deployment (> 10,000 workflows)
+cache:
+  keyValue:
+    maximumSize: 100000
+    expireAfterAccess: 3600
+  keySet:
+    maximumSize: 100000
+    expireAfterAccess: 3600
+```
+
+## Multiple Storage Backends
+
+You can override the default storage for specific engines:
+
+```yaml
+storage:
+  postgres:
+    host: postgres.example.com
+    port: 5432
+    username: infinitic
+    password: ${DB_PASSWORD}
+
+workflows:
+  - name: MyWorkflow
+    stateEngine:
+      concurrency: 10
+      storage:  # Override default storage
+        redis:
+          host: redis.example.com
+          port: 6379
+          password: ${REDIS_PASSWORD}
+```
+
+## Best Practices
+
+### Production Deployments
+
+- **Use PostgreSQL or Redis** - InMemory is not durable
+- **Enable compression** - Reduces storage and bandwidth
+- **Configure caching** - Improves performance
+- **Set connection pools** - Optimize for workload
+- **Use connection pooling** - Reuse database connections
+- **Monitor storage size** - Track growth and optimize
+
+### High Availability
+
+#### PostgreSQL
+
+```yaml
+storage:
+  postgres:
+    host: postgres-primary.example.com,postgres-standby.example.com
+    port: 5432
+    username: infinitic
+    password: ${DB_PASSWORD}
+    maximumPoolSize: 20
+    connectionTimeout: 10000
+```
+
+#### Redis
+
+```yaml
+storage:
+  redis:
+    host: redis-1.example.com,redis-2.example.com,redis-3.example.com
+    port: 6379
+    password: ${REDIS_PASSWORD}
+    ssl: true
+    poolConfig:
+      maxTotal: 50
+      minIdle: 10
+```
+
+### Security
+
+- **Use SSL/TLS** - Encrypt connections in production
+- **Rotate credentials** - Regular password rotation
+- **Limit permissions** - Use least-privilege access
+- **Environment variables** - Never hardcode credentials
+
+```yaml
+storage:
+  postgres:
+    host: ${DB_HOST}
+    port: ${DB_PORT}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    ssl: true
+```
+
+## Troubleshooting
+
+### Connection Issues
+
+```yaml
+storage:
+  postgres:
+    # ... connection settings ...
+    connectionTimeout: 30000  # Increase timeout
+    maximumPoolSize: 20       # Increase pool size
+```
+
+### Performance Issues
+
+```yaml
+storage:
+  postgres:
+    # ... connection settings ...
+    maximumPoolSize: 50
+    compression:
+      mode: gzip
+    cache:
+      keyValue:
+        maximumSize: 50000
+        expireAfterAccess: 3600
+```
+
+### High Storage Usage
+
+- Enable compression
+- Implement workflow cleanup
+- Archive old workflow data
+- Monitor state size
+
+## See Also
+
+- [Worker Configuration](/configuration/workers) - Configure workers
+- [Transport Configuration](/configuration/transport) - Configure message transport

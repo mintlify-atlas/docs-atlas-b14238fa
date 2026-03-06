@@ -1,0 +1,603 @@
+---
+title: Clients
+description: Learn how to start and interact with workflows and services using the Infinitic client
+---
+
+The Infinitic Client is your interface to interact with workflows and services. It allows you to start workflows, send signals, query status, and manage running instances from your application code.
+
+## What is a Client?
+
+The `InfiniticClient` provides a type-safe API to:
+
+- **Start workflows** and get results
+- **Interact with running workflows** via signals and channels
+- **Query workflow status** and retrieve information
+- **Cancel workflows** when needed
+- **Retry failed tasks** within workflows
+- **Complete delegated tasks** for human-in-the-loop scenarios
+
+<CardGroup cols={2}>
+  <Card title="Type-Safe API" icon="shield-check">
+    Use interfaces for compile-time safety
+  </Card>
+  <Card title="Async Operations" icon="bolt">
+    Non-blocking operations with CompletableFuture
+  </Card>
+  <Card title="Workflow Control" icon="sliders">
+    Start, stop, retry, and query workflows
+  </Card>
+  <Card title="Tag-Based Routing" icon="tags">
+    Find and interact with workflows by custom tags
+  </Card>
+</CardGroup>
+
+## Creating a Client
+
+### Using Builder Pattern
+
+```kotlin
+import io.infinitic.clients.InfiniticClient
+import io.infinitic.transport.config.TransportConfig
+
+fun main() {
+    val client = InfiniticClient.builder()
+        .setName("my-client")
+        .setTransport(
+            TransportConfig.builder()
+                .setPulsar(
+                    PulsarConfig.builder()
+                        .setBrokerServiceUrl("pulsar://localhost:6650")
+                        .setWebServiceUrl("http://localhost:8080")
+                        .setTenant("infinitic")
+                        .setNamespace("dev")
+                        .build()
+                )
+                .build()
+        )
+        .build()
+    
+    // Use the client
+    val workflow = client.newWorkflow(OrderWorkflow::class.java)
+    val result = workflow.processOrder(orderId)
+    
+    // Close when done
+    client.close()
+}
+```
+
+### Using YAML Configuration
+
+```kotlin
+import io.infinitic.clients.InfiniticClient
+
+fun main() {
+    // Load from resources
+    val client = InfiniticClient.fromYamlResource("/infinitic-client.yml")
+    
+    // Or from file
+    // val client = InfiniticClient.fromYamlFile("config/infinitic-client.yml")
+    
+    // Or from string
+    // val client = InfiniticClient.fromYamlString(yamlContent)
+    
+    // Use the client
+    val workflow = client.newWorkflow(OrderWorkflow::class.java)
+    val result = workflow.processOrder(orderId)
+    
+    client.close()
+}
+```
+
+<Tabs>
+  <Tab title="infinitic-client.yml">
+    ```yaml
+    name: my-client
+    
+    transport:
+      pulsar:
+        brokerServiceUrl: pulsar://localhost:6650
+        webServiceUrl: http://localhost:8080
+        tenant: infinitic
+        namespace: dev
+        shutdownGracePeriodSeconds: 10
+    ```
+  </Tab>
+  
+  <Tab title="Java Example">
+    ```java
+    import io.infinitic.clients.InfiniticClient;
+    
+    public class ClientApp {
+        public static void main(String[] args) {
+            try (InfiniticClient client = InfiniticClient.fromYamlResource(
+                "/infinitic-client.yml"
+            )) {
+                OrderWorkflow workflow = client.newWorkflow(
+                    OrderWorkflow.class
+                );
+                
+                OrderResult result = workflow.processOrder(orderId);
+                
+                System.out.println("Order result: " + result);
+            }
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+The client implementation is in `InfiniticClient.kt` and extends `InfiniticClientInterface` which defines all client operations.
+</Note>
+
+## Starting Workflows
+
+### Synchronous Execution
+
+Call workflow methods directly to wait for completion:
+
+```kotlin
+val client = InfiniticClient.fromYamlResource("/infinitic-client.yml")
+
+// Create a new workflow stub
+val workflow = client.newWorkflow(OrderWorkflow::class.java)
+
+// Execute workflow method - blocks until completion
+val result: OrderResult = workflow.processOrder(orderId)
+
+println("Order processed: ${result.transactionId}")
+
+client.close()
+```
+
+### Asynchronous Execution
+
+Use `startAsync` to get a `Deferred` handle without blocking:
+
+```kotlin
+val client = InfiniticClient.fromYamlResource("/infinitic-client.yml")
+
+val workflow = client.newWorkflow(OrderWorkflow::class.java)
+
+// Start asynchronously - returns immediately
+val deferredFuture = client.startAsync {
+    workflow.processOrder(orderId)
+}
+
+// Get the Deferred handle
+val deferred = deferredFuture.get()
+
+// Later, check status
+val status = deferred.status()
+println("Workflow status: $status")
+
+// Or await completion
+val result = deferred.await()
+
+client.close()
+```
+
+### With Tags
+
+Tag workflows for easy lookup:
+
+```kotlin
+val client = InfiniticClient.fromYamlResource("/infinitic-client.yml")
+
+// Create workflow with tags
+val workflow = client.newWorkflow(
+    OrderWorkflow::class.java,
+    tags = setOf("user:${userId}", "order:${orderId}")
+)
+
+val result = workflow.processOrder(orderId)
+
+client.close()
+```
+
+### With Metadata
+
+Attach metadata to workflows:
+
+```kotlin
+val client = InfiniticClient.fromYamlResource("/infinitic-client.yml")
+
+// Create workflow with metadata
+val workflow = client.newWorkflow(
+    OrderWorkflow::class.java,
+    tags = setOf("user:${userId}"),
+    meta = mapOf(
+        "priority" to "high".toByteArray(),
+        "region" to "us-west".toByteArray(),
+        "version" to "2.0".toByteArray()
+    )
+)
+
+val result = workflow.processOrder(orderId)
+
+client.close()
+```
+
+## Interacting with Running Workflows
+
+### Get Workflow by ID
+
+Retrieve a workflow instance by its unique ID:
+
+```kotlin
+val client = InfiniticClient.fromYamlResource("/infinitic-client.yml")
+
+// Get existing workflow by ID
+val workflow = client.getWorkflowById(
+    OrderWorkflow::class.java,
+    workflowId = "550e8400-e29b-41d4-a716-446655440000"
+)
+
+// Call methods or send signals
+workflow.updateStatus("processing")
+
+client.close()
+```
+
+### Get Workflow by Tag
+
+Find workflows using custom tags:
+
+```kotlin
+val client = InfiniticClient.fromYamlResource("/infinitic-client.yml")
+
+// Get workflow by tag
+val workflow = client.getWorkflowByTag(
+    OrderWorkflow::class.java,
+    tag = "order:${orderId}"
+)
+
+// Interact with the workflow
+val status = workflow.getStatus()
+
+// Get all IDs associated with a tag
+val ids: Set<String> = client.getIds(workflow)
+println("Found ${ids.size} workflows with tag")
+
+client.close()
+```
+
+### Send Signals via Channels
+
+Communicate with running workflows through channels:
+
+```kotlin
+// Workflow interface with channel method
+interface ApprovalWorkflow {
+    fun requestApproval(requestId: String): String
+    fun sendApproval(approved: Boolean)
+}
+
+// Client code
+val client = InfiniticClient.fromYamlResource("/infinitic-client.yml")
+
+// Get workflow by ID
+val workflow = client.getWorkflowById(
+    ApprovalWorkflow::class.java,
+    workflowId = approvalWorkflowId
+)
+
+// Send approval signal
+workflow.sendApproval(true)
+
+client.close()
+```
+
+## Managing Workflows
+
+### Cancel Workflow
+
+Cancel a running workflow:
+
+```kotlin
+val client = InfiniticClient.fromYamlResource("/infinitic-client.yml")
+
+val workflow = client.getWorkflowById(
+    OrderWorkflow::class.java,
+    workflowId = workflowId
+)
+
+// Cancel the workflow
+client.cancelAsync(workflow).get()
+println("Workflow cancelled")
+
+client.close()
+```
+
+### Retry Workflow Task
+
+Retry a failed workflow task:
+
+```kotlin
+val client = InfiniticClient.fromYamlResource("/infinitic-client.yml")
+
+val workflow = client.getWorkflowById(
+    OrderWorkflow::class.java,
+    workflowId = workflowId
+)
+
+// Retry the workflow task
+client.retryWorkflowTaskAsync(workflow).get()
+
+client.close()
+```
+
+### Retry Failed Tasks
+
+Retry service tasks within a workflow:
+
+```kotlin
+val client = InfiniticClient.fromYamlResource("/infinitic-client.yml")
+
+val workflow = client.getWorkflowById(
+    OrderWorkflow::class.java,
+    workflowId = workflowId
+)
+
+// Retry specific task by ID
+client.retryTasksAsync(workflow, taskId = "task-123").get()
+
+// Or retry by status
+import io.infinitic.workflows.DeferredStatus
+
+client.retryTasksAsync(
+    workflow,
+    taskStatus = DeferredStatus.FAILED
+).get()
+
+// Or retry by service class
+client.retryTasksAsync(
+    workflow,
+    taskStatus = DeferredStatus.FAILED,
+    taskClass = PaymentService::class.java
+).get()
+
+client.close()
+```
+
+### Complete Timers
+
+Manually complete timers in a workflow:
+
+```kotlin
+val client = InfiniticClient.fromYamlResource("/infinitic-client.yml")
+
+val workflow = client.getWorkflowById(
+    OrderWorkflow::class.java,
+    workflowId = workflowId
+)
+
+// Complete all timers
+client.completeTimersAsync(workflow).get()
+
+// Or complete specific timer by method ID
+client.completeTimersAsync(workflow, id = "method-id").get()
+
+client.close()
+```
+
+## Delegated Tasks
+
+Complete tasks that are delegated to external systems:
+
+```kotlin
+val client = InfiniticClient.fromYamlResource("/infinitic-client.yml")
+
+// Complete a delegated task
+client.completeDelegatedTaskAsync(
+    serviceName = "ApprovalService",
+    taskId = "task-456",
+    result = true // Approval result
+).get()
+
+println("Delegated task completed")
+
+client.close()
+```
+
+This is useful for human-in-the-loop workflows where tasks need manual completion.
+
+## Working with Deferred
+
+The `lastDeferred` property provides access to the most recent deferred:
+
+```kotlin
+val client = InfiniticClient.fromYamlResource("/infinitic-client.yml")
+
+val workflow = client.newWorkflow(OrderWorkflow::class.java)
+
+// Start workflow asynchronously
+val deferredFuture = client.startAsync {
+    workflow.processOrder(orderId)
+}
+
+// Or access the last deferred after a stub call
+workflow.processOrder(orderId)
+val deferred = client.lastDeferred
+
+// Check ID
+println("Workflow ID: ${deferred.id}")
+
+// Check status
+when (deferred.status()) {
+    DeferredStatus.ONGOING -> println("Still running")
+    DeferredStatus.COMPLETED -> println("Completed")
+    DeferredStatus.FAILED -> println("Failed")
+    DeferredStatus.CANCELED -> println("Canceled")
+    DeferredStatus.UNKNOWN -> println("Unknown")
+}
+
+client.close()
+```
+
+## Client Lifecycle
+
+The client manages resources that should be properly closed:
+
+```kotlin
+fun main() {
+    val client = InfiniticClient.fromYamlResource("/infinitic-client.yml")
+    
+    try {
+        // Use the client
+        val workflow = client.newWorkflow(OrderWorkflow::class.java)
+        workflow.processOrder(orderId)
+    } finally {
+        // Close client to release resources
+        client.close()
+    }
+    
+    // Or use try-with-resources (Java) / use (Kotlin)
+    InfiniticClient.fromYamlResource("/infinitic-client.yml").use { client ->
+        val workflow = client.newWorkflow(OrderWorkflow::class.java)
+        workflow.processOrder(orderId)
+    }
+}
+```
+
+The `close()` method:
+- Cancels ongoing operations
+- Waits for in-flight messages (up to `shutdownGracePeriodSeconds`)
+- Deletes the client topic
+- Closes transport connections
+
+<Info>
+From `InfiniticClient.kt:99-120`, the client implements proper cleanup with a configurable grace period for shutdown.
+</Info>
+
+## Client Configuration
+
+Key configuration options:
+
+| Option | Description | Default |
+|--------|-------------|--------|
+| `name` | Client name for identification | Generated |
+| `transport` | Transport configuration (Pulsar) | Required |
+| `shutdownGracePeriodSeconds` | Shutdown wait time | 30 |
+
+## Spring Boot Integration
+
+```kotlin
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+import io.infinitic.clients.InfiniticClient
+
+@Configuration
+class InfiniticConfig {
+    
+    @Bean
+    fun infiniticClient(): InfiniticClient {
+        return InfiniticClient.fromYamlResource("/infinitic-client.yml")
+    }
+    
+    @Bean
+    fun orderService(client: InfiniticClient): OrderService {
+        return OrderServiceImpl(client)
+    }
+}
+
+class OrderServiceImpl(private val client: InfiniticClient) : OrderService {
+    override fun createOrder(order: Order): OrderResult {
+        val workflow = client.newWorkflow(
+            OrderWorkflow::class.java,
+            tags = setOf("user:${order.userId}")
+        )
+        return workflow.processOrder(order.id)
+    }
+}
+```
+
+## Error Handling
+
+```kotlin
+import io.infinitic.exceptions.clients.InvalidStubException
+
+val client = InfiniticClient.fromYamlResource("/infinitic-client.yml")
+
+try {
+    val workflow = client.newWorkflow(OrderWorkflow::class.java)
+    val result = workflow.processOrder(orderId)
+    
+    println("Success: $result")
+} catch (e: InvalidStubException) {
+    println("Invalid workflow stub: ${e.message}")
+} catch (e: Exception) {
+    println("Workflow failed: ${e.message}")
+} finally {
+    client.close()
+}
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Reuse Client Instances" icon="recycle">
+    Create one client instance per application, not per request
+  </Card>
+  <Card title="Use Tags Wisely" icon="tags">
+    Tag workflows for easy lookup, but don't overuse (they consume storage)
+  </Card>
+  <Card title="Handle Timeouts" icon="clock">
+    Set appropriate timeouts for long-running workflows
+  </Card>
+  <Card title="Close Properly" icon="door-closed">
+    Always close the client to release resources
+  </Card>
+</CardGroup>
+
+## Testing with Client
+
+```kotlin
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.AfterEach
+
+class OrderWorkflowIntegrationTest {
+    private lateinit var client: InfiniticClient
+    
+    @BeforeEach
+    fun setup() {
+        client = InfiniticClient.fromYamlResource("/infinitic-test.yml")
+    }
+    
+    @AfterEach
+    fun teardown() {
+        client.close()
+    }
+    
+    @Test
+    fun `test order workflow`() {
+        val workflow = client.newWorkflow(
+            OrderWorkflow::class.java,
+            tags = setOf("test:${System.currentTimeMillis()}")
+        )
+        
+        val result = workflow.processOrder("test-order-123")
+        
+        assertNotNull(result.transactionId)
+        assertEquals(OrderStatus.COMPLETED, result.status)
+    }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Workflows" href="/concepts/workflows" icon="diagram-project">
+    Learn about workflow orchestration patterns
+  </Card>
+  <Card title="Services" href="/concepts/services" icon="server">
+    Understand how to implement services
+  </Card>
+  <Card title="Workers" href="/concepts/workers" icon="gears">
+    Deploy workers to execute workflows
+  </Card>
+  <Card title="Architecture" href="/concepts/architecture" icon="sitemap">
+    Explore the complete system architecture
+  </Card>
+</CardGroup>

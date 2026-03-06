@@ -1,0 +1,379 @@
+---
+title: "@Ignore"
+description: Exclude workflow properties from state serialization
+---
+
+The `@Ignore` annotation marks workflow properties that should not be serialized and stored as part of the workflow state.
+
+## Package
+
+```kotlin
+io.infinitic.annotations.Ignore
+```
+
+## Targets
+
+- Fields (class properties)
+- Properties (class properties)
+
+## Overview
+
+Use `@Ignore` for workflow properties that:
+- Are stateless or can be recreated
+- Hold references to external services or clients
+- Contain non-serializable objects
+- Should not be persisted between workflow method executions
+
+## Usage
+
+### Basic Example
+
+```kotlin
+import io.infinitic.annotations.Ignore
+import io.infinitic.workflows.Workflow
+
+class BookingWorkflowImpl : Workflow(), BookingWorkflow {
+  // This will be serialized and persisted
+  private var bookingId: String? = null
+  private var customerEmail: String? = null
+  
+  // These will NOT be serialized
+  @Ignore
+  private val logger = LoggerFactory.getLogger(javaClass)
+  
+  @Ignore
+  private val metrics = MetricsCollector()
+  
+  override fun processBooking(id: String, email: String): BookingResult {
+    bookingId = id
+    customerEmail = email
+    
+    logger.info("Processing booking: $id")
+    metrics.increment("bookings.started")
+    
+    // Workflow logic...
+    return BookingResult.success()
+  }
+}
+```
+
+## Common Use Cases
+
+### Loggers
+
+```kotlin
+import org.slf4j.LoggerFactory
+import io.infinitic.annotations.Ignore
+
+class OrderWorkflowImpl : Workflow(), OrderWorkflow {
+  @Ignore
+  private val logger = LoggerFactory.getLogger(javaClass)
+  
+  override fun processOrder(orderId: String): OrderResult {
+    logger.info("Processing order: $orderId")
+    // ...
+  }
+}
+```
+
+### Metrics Collectors
+
+```kotlin
+class PaymentWorkflowImpl : Workflow(), PaymentWorkflow {
+  @Ignore
+  private val metrics = MetricsRegistry.getInstance()
+  
+  override fun processPayment(amount: Double): PaymentResult {
+    metrics.recordPaymentAttempt(amount)
+    // ...
+  }
+}
+```
+
+### Cached Service Stubs
+
+```kotlin
+class NotificationWorkflowImpl : Workflow(), NotificationWorkflow {
+  @Ignore
+  private lateinit var emailService: EmailService
+  
+  @Ignore
+  private lateinit var smsService: SMSService
+  
+  override fun sendNotification(userId: String, message: String): NotificationResult {
+    // Initialize stubs if needed (they'll be recreated after deserialization)
+    if (!::emailService.isInitialized) {
+      emailService = newService(EmailService::class.java)
+    }
+    if (!::smsService.isInitialized) {
+      smsService = newService(SMSService::class.java)
+    }
+    
+    // Use the services
+    dispatch(emailService::send, userId, message).await()
+    return NotificationResult.success()
+  }
+}
+```
+
+### Thread-Local or Contextual Data
+
+```kotlin
+class AuditWorkflowImpl : Workflow(), AuditWorkflow {
+  @Ignore
+  private val requestContext = RequestContext.current()
+  
+  override fun auditAction(action: String): AuditResult {
+    // Request context doesn't need to be serialized
+    val userId = requestContext.userId
+    // ...
+  }
+}
+```
+
+### Computed Properties
+
+```kotlin
+class ReportWorkflowImpl : Workflow(), ReportWorkflow {
+  private var startTime: Instant? = null
+  private var endTime: Instant? = null
+  
+  @Ignore
+  private val duration: Duration?
+    get() = if (startTime != null && endTime != null) {
+      Duration.between(startTime, endTime)
+    } else null
+  
+  override fun generateReport(reportId: String): ReportResult {
+    startTime = Instant.now()
+    // Process report...
+    endTime = Instant.now()
+    
+    // Duration is computed, not stored
+    logger.info("Report generated in ${duration?.toMillis()}ms")
+    return ReportResult.success()
+  }
+}
+```
+
+## Lazy Initialization Pattern
+
+For ignored properties that are expensive to create, use lazy initialization:
+
+```kotlin
+class DataProcessingWorkflowImpl : Workflow(), DataProcessingWorkflow {
+  // State that IS persisted
+  private var processedRecords = 0
+  private var failedRecords = 0
+  
+  // Stateless dependencies that are NOT persisted
+  @Ignore
+  private val dataService by lazy { newService(DataService::class.java) }
+  
+  @Ignore
+  private val validationService by lazy { newService(ValidationService::class.java) }
+  
+  @Ignore
+  private val logger by lazy { LoggerFactory.getLogger(javaClass) }
+  
+  override fun processDataset(datasetId: String): ProcessingResult {
+    logger.info("Starting dataset processing: $datasetId")
+    
+    val records = dispatch(dataService::fetchRecords, datasetId).await()
+    
+    records.forEach { record ->
+      try {
+        dispatch(validationService::validate, record).await()
+        processedRecords++
+      } catch (e: Exception) {
+        logger.error("Failed to process record: ${record.id}", e)
+        failedRecords++
+      }
+    }
+    
+    return ProcessingResult(processedRecords, failedRecords)
+  }
+}
+```
+
+## What Should NOT Be Ignored
+
+Do not use `@Ignore` on:
+
+### Workflow State
+
+```kotlin
+// WRONG - This state will be lost!
+@Ignore
+private var currentStep: String? = null
+
+// CORRECT - This state is preserved
+private var currentStep: String? = null
+```
+
+### Business Data
+
+```kotlin
+// WRONG - Important data will be lost!
+@Ignore
+private var orderId: String? = null
+@Ignore
+private var totalAmount: Double = 0.0
+
+// CORRECT - Business data must be preserved
+private var orderId: String? = null
+private var totalAmount: Double = 0.0
+```
+
+### Deferred Results You Need Later
+
+```kotlin
+// WRONG - You can't await this after workflow resumes!
+@Ignore
+private lateinit var paymentDeferred: Deferred<PaymentResult>
+
+// CORRECT - Don't store Deferred in properties at all
+// Use them directly within the method
+override fun processOrder(orderId: String): OrderResult {
+  val paymentDeferred = dispatch(paymentService::charge, amount)
+  return OrderResult(paymentDeferred.await())
+}
+```
+
+## Best Practices
+
+1. **Use @Ignore liberally for infrastructure**: Loggers, metrics, clients
+2. **Never ignore business state**: Any data needed for workflow logic
+3. **Test serialization**: Ensure workflows can be serialized/deserialized
+4. **Initialize ignored fields safely**: Use lateinit or lazy with null checks
+5. **Document ignored fields**: Explain why they're ignored
+6. **Keep workflows lightweight**: Minimize the amount of state to serialize
+
+## Serialization Example
+
+```kotlin
+import io.infinitic.annotations.Ignore
+import io.infinitic.workflows.Workflow
+import java.time.Instant
+
+class OrderWorkflowImpl : Workflow(), OrderWorkflow {
+  // ===== PERSISTED STATE =====
+  // These will be serialized and stored in the state database
+  private var orderId: String? = null
+  private var customerId: String? = null
+  private var items: List<OrderItem> = emptyList()
+  private var totalAmount: Double = 0.0
+  private var status: OrderStatus = OrderStatus.PENDING
+  private var createdAt: Instant? = null
+  private var completedAt: Instant? = null
+  
+  // ===== IGNORED STATE =====
+  // These will NOT be serialized; recreated on each workflow task
+  @Ignore
+  private val logger = LoggerFactory.getLogger(javaClass)
+  
+  @Ignore
+  private val metrics = MetricsCollector.getInstance()
+  
+  @Ignore
+  private val orderService by lazy { newService(OrderService::class.java) }
+  
+  @Ignore
+  private val paymentService by lazy { newService(PaymentService::class.java) }
+  
+  @Ignore
+  private val inventoryService by lazy { newService(InventoryService::class.java) }
+  
+  override fun processOrder(
+    id: String,
+    customerId: String,
+    items: List<OrderItem>
+  ): OrderResult {
+    // Initialize persisted state
+    this.orderId = id
+    this.customerId = customerId
+    this.items = items
+    this.createdAt = Instant.now()
+    this.totalAmount = items.sumOf { it.price * it.quantity }
+    
+    // Use ignored infrastructure
+    logger.info("Processing order: $id for customer: $customerId")
+    metrics.increment("orders.started")
+    
+    try {
+      // Reserve inventory
+      status = OrderStatus.RESERVING_INVENTORY
+      dispatch(inventoryService::reserve, items).await()
+      
+      // Process payment
+      status = OrderStatus.PROCESSING_PAYMENT
+      val payment = dispatch(paymentService::charge, customerId, totalAmount).await()
+      
+      // Create order
+      status = OrderStatus.CREATING_ORDER
+      dispatch(orderService::create, id, items, payment).await()
+      
+      // Complete
+      status = OrderStatus.COMPLETED
+      completedAt = Instant.now()
+      
+      logger.info("Order completed: $id")
+      metrics.increment("orders.completed")
+      
+      return OrderResult.success(id)
+      
+    } catch (e: Exception) {
+      status = OrderStatus.FAILED
+      logger.error("Order failed: $id", e)
+      metrics.increment("orders.failed")
+      throw e
+    }
+  }
+}
+
+enum class OrderStatus {
+  PENDING,
+  RESERVING_INVENTORY,
+  PROCESSING_PAYMENT,
+  CREATING_ORDER,
+  COMPLETED,
+  FAILED
+}
+```
+
+## Testing
+
+Test that ignored properties don't break workflow execution:
+
+```kotlin
+import io.infinitic.workflows.Workflow
+import org.junit.jupiter.api.Test
+import kotlin.test.assertEquals
+
+class WorkflowSerializationTest {
+  @Test
+  fun `workflow state can be serialized and deserialized`() {
+    val workflow = OrderWorkflowImpl()
+    
+    // Set some state
+    workflow.processOrder("order-123", "customer-456", items)
+    
+    // Simulate serialization/deserialization
+    val serialized = serializeWorkflow(workflow)
+    val deserialized = deserializeWorkflow<OrderWorkflowImpl>(serialized)
+    
+    // Persisted state should be preserved
+    assertEquals("order-123", deserialized.orderId)
+    assertEquals("customer-456", deserialized.customerId)
+    
+    // Ignored properties will be reinitialized
+    // (test that workflow still works)
+    deserialized.sendConfirmation()
+  }
+}
+```
+
+## See Also
+
+- [Workflow](/api/workflow) - For workflow implementation
+- [Name Annotation](/api/annotations/name) - For custom naming

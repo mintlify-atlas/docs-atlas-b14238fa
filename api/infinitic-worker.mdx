@@ -1,0 +1,289 @@
+---
+title: InfiniticWorker
+description: Worker for executing Infinitic workflows and tasks
+---
+
+The `InfiniticWorker` class manages the execution of workflows and tasks in Infinitic. Workers process messages from the message broker, execute tasks and workflow logic, and manage workflow state.
+
+## Package
+
+```kotlin
+io.infinitic.workers.InfiniticWorker
+```
+
+## Constructor
+
+<ParamField path="config" type="InfiniticWorkerConfigInterface" required>
+  The worker configuration including transport, storage, and service/workflow definitions
+</ParamField>
+
+## Creation Methods
+
+### From Builder
+
+```kotlin
+val worker = InfiniticWorker.builder()
+  .setTransport(transportConfig)
+  .setStorage(storageConfig)
+  .addService(serviceConfig)
+  .addWorkflow(workflowConfig)
+  .build()
+```
+
+### From YAML
+
+<ParamField path="fromYamlResource" type="InfiniticWorker">
+  Creates a worker from YAML files in the resources directory
+  
+  **Parameters:**
+  - `resources: String...` - Resource paths
+  
+  **Example:**
+  ```kotlin
+  val worker = InfiniticWorker.fromYamlResource(
+    "infinitic.yml"
+  )
+  ```
+</ParamField>
+
+<ParamField path="fromYamlFile" type="InfiniticWorker">
+  Creates a worker from YAML files in the file system
+  
+  **Parameters:**
+  - `files: String...` - File paths
+  
+  **Example:**
+  ```kotlin
+  val worker = InfiniticWorker.fromYamlFile(
+    "/etc/infinitic/worker.yml"
+  )
+  ```
+</ParamField>
+
+<ParamField path="fromYamlString" type="InfiniticWorker">
+  Creates a worker from YAML strings
+  
+  **Parameters:**
+  - `yamls: String...` - YAML content strings
+</ParamField>
+
+## Instance Methods
+
+### Lifecycle Management
+
+<ParamField path="start" type="Unit">
+  Starts the worker synchronously (blocks current thread)
+  
+  This method starts all configured consumers and begins processing messages. It blocks until the worker is closed or an error occurs.
+  
+  **Example:**
+  ```kotlin
+  val worker = InfiniticWorker.fromYamlResource("infinitic.yml")
+  worker.start() // Blocks here
+  ```
+</ParamField>
+
+<ParamField path="startAsync" type="CompletableFuture<Unit>">
+  Starts the worker asynchronously
+  
+  **Returns:** A CompletableFuture that completes when the worker is fully started
+  
+  **Example:**
+  ```kotlin
+  val worker = InfiniticWorker.fromYamlResource("infinitic.yml")
+  val future = worker.startAsync()
+  // Worker is starting in background
+  // Do other initialization
+  future.join() // Wait for startup to complete
+  ```
+</ParamField>
+
+<ParamField path="close" type="Unit">
+  Stops the worker gracefully
+  
+  Cancels all message consumers and waits for ongoing messages to complete processing within the configured grace period. Automatically called on JVM shutdown.
+  
+  **Example:**
+  ```kotlin
+  worker.use { worker ->
+    worker.start()
+  } // Automatically closed
+  ```
+</ParamField>
+
+## Properties
+
+<ParamField path="client" type="InfiniticClient">
+  Built-in Infinitic client for dispatching workflows and tasks
+  
+  Workers have access to a client instance that shares the same transport configuration, useful for starting child workflows or dispatching tasks.
+  
+  **Example:**
+  ```kotlin
+  class MyServiceImpl : MyService {
+    override fun process(data: String) {
+      // Access worker's client if needed
+      // Note: Typically use Workflow.newService() within workflows
+    }
+  }
+  ```
+</ParamField>
+
+<ParamField path="config" type="InfiniticWorkerConfigInterface">
+  The worker configuration
+</ParamField>
+
+## Worker Architecture
+
+The worker manages several types of components:
+
+### Service Executors
+
+Execute task implementations:
+- Process `ExecuteTask` messages
+- Run user-defined service methods
+- Handle retries and timeouts
+- Support batch processing
+
+### Workflow Executors
+
+Execute workflow logic:
+- Process workflow tasks
+- Run workflow methods
+- Manage workflow state transitions
+- Handle deterministic execution
+
+### Tag Engines
+
+Manage workflow and task tags:
+- Map tags to IDs
+- Handle tag-based queries
+- Maintain tag indexes in storage
+
+### State Engines
+
+Manage workflow state:
+- Store and retrieve workflow state
+- Process state transitions
+- Handle workflow commands
+- Manage timers and signals
+
+## Configuration
+
+Workers are configured with:
+
+- **Transport**: Message broker configuration (Pulsar, In-Memory)
+- **Storage**: State storage configuration (Redis, PostgreSQL, MySQL, In-Memory)
+- **Services**: Task service definitions with concurrency and retry policies
+- **Workflows**: Workflow definitions with state engine and tag engine settings
+- **Event Listeners**: Optional event listeners for monitoring
+
+## Usage Example
+
+```kotlin
+import io.infinitic.workers.InfiniticWorker
+
+fun main() {
+  // Create worker from YAML configuration
+  val worker = InfiniticWorker.fromYamlResource("worker.yml")
+  
+  // Register shutdown hook (automatically added by start())
+  Runtime.getRuntime().addShutdownHook(Thread {
+    println("Shutting down worker...")
+    worker.close()
+  })
+  
+  // Start worker (blocks)
+  println("Starting worker...")
+  worker.start()
+}
+```
+
+### Example with Async Start
+
+```kotlin
+import io.infinitic.workers.InfiniticWorker
+import kotlinx.coroutines.runBlocking
+
+fun main() = runBlocking {
+  val worker = InfiniticWorker.fromYamlResource("worker.yml")
+  
+  try {
+    // Start asynchronously
+    val startFuture = worker.startAsync()
+    println("Worker starting...")
+    
+    startFuture.join()
+    println("Worker started successfully")
+    
+    // Keep running
+    Thread.currentThread().join()
+    
+  } finally {
+    worker.close()
+  }
+}
+```
+
+## Graceful Shutdown
+
+When `close()` is called, the worker:
+
+1. Stops accepting new messages
+2. Waits for ongoing messages to complete (up to `shutdownGracePeriodSeconds`)
+3. Logs statistics about in-flight messages
+4. Closes executors and transport connections
+5. Deletes temporary resources
+
+```kotlin
+worker.close() // Waits for graceful shutdown
+```
+
+## Monitoring
+
+The worker logs detailed information about:
+
+- Startup configuration (concurrency, storage, timeouts)
+- Message processing (received, in-flight, completed)
+- Errors and retries
+- Shutdown statistics
+
+Example log output:
+```
+Service PaymentService:
+* Service Executor      : (concurrency: 10, class: PaymentServiceImpl, timeout: 30.00s)
+* Service Tag Engine    : (concurrency: 5, storage: redis, cache: caffeine)
+
+Workflow BookingWorkflow:
+* Workflow Executor     : (concurrency: 10, classes: BookingWorkflowImpl, timeout: 60.00s)
+* Workflow Tag Engine   : (concurrency: 5, storage: redis, cache: caffeine)
+* Workflow State Engine : (concurrency: 10, storage: redis, cache: caffeine)
+
+Worker 'worker-1' ready (shutdownGracePeriodSeconds=30s)
+```
+
+## Thread Safety
+
+The `InfiniticWorker` manages internal thread pools for:
+
+- Message consumption (coroutines)
+- Task execution (executor services)
+- Workflow execution (executor services)
+
+Concurrency is controlled via configuration settings.
+
+## Error Handling
+
+The worker handles errors through:
+
+- **Automatic retries**: Based on retry policies
+- **Dead letter queues**: For messages that cannot be processed
+- **Graceful degradation**: Failed components don't affect others
+- **Logging**: Comprehensive error logging with context
+
+## See Also
+
+- [Worker Configuration](/api/config/worker-config) - For configuration options
+- [Transport Configuration](/api/config/transport-config) - For message broker setup
+- [Storage Configuration](/api/config/storage-config) - For state storage setup
+- [Workflow](/api/workflow) - For implementing workflows

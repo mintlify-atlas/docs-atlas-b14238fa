@@ -1,0 +1,229 @@
+---
+title: Services Overview
+description: Understanding services in Infinitic - the fundamental building blocks for task execution
+---
+
+## What are Services?
+
+Services are the fundamental building blocks of Infinitic. A service is a Java or Kotlin class that implements business logic and performs tasks. Services are executed by workers and can be called from workflows or clients.
+
+## Key Concepts
+
+### Service Interface and Implementation
+
+Services in Infinitic follow an interface-implementation pattern:
+
+- **Interface**: Defines the contract for your service methods
+- **Implementation**: Contains the actual business logic
+
+```kotlin
+interface NotificationService {
+  fun sendEmail(email: String, subject: String, body: String): Boolean
+  fun sendSMS(phone: String, message: String): Boolean
+}
+
+class NotificationServiceImpl : NotificationService {
+  override fun sendEmail(email: String, subject: String, body: String): Boolean {
+    // Send email using your provider
+    return true
+  }
+
+  override fun sendSMS(phone: String, message: String): Boolean {
+    // Send SMS using your provider
+    return true
+  }
+}
+```
+
+### Service Name
+
+By default, Infinitic uses the fully qualified class name as the service name. You can customize this using the `@Name` annotation:
+
+```kotlin
+import io.infinitic.annotations.Name
+
+@Name("notifications")
+interface NotificationService {
+  fun sendEmail(email: String, subject: String, body: String): Boolean
+}
+```
+
+The `@Name` annotation can also be applied to individual methods:
+
+```kotlin
+interface NotificationService {
+  @Name("email")
+  fun sendEmail(email: String, subject: String, body: String): Boolean
+}
+```
+
+## Service Features
+
+Infinitic services support several advanced features:
+
+### 1. Task Context Access
+
+Every task has access to contextual information through the `Task` object, including task ID, retry information, workflow context, and more.
+
+[Learn more about Task Context →](/services/service-context)
+
+### 2. Delegated Tasks
+
+For long-running operations or external system integrations, you can delegate task completion to external systems using the `@Delegated` annotation.
+
+[Learn more about Delegated Tasks →](/services/delegated-tasks)
+
+### 3. Batch Processing
+
+Optimize performance by processing multiple tasks together using the `@Batch` annotation. Perfect for database operations, API calls, or any operation that benefits from batching.
+
+[Learn more about Batching →](/services/batching)
+
+### 4. Retry and Timeout Configuration
+
+Services support automatic retry mechanisms and timeout configurations:
+
+```kotlin
+import io.infinitic.annotations.Retry
+import io.infinitic.annotations.Timeout
+import io.infinitic.tasks.WithRetry
+import io.infinitic.tasks.WithTimeout
+
+class ExponentialBackoffRetry : WithRetry {
+  override fun getSecondsBeforeRetry(retry: Int, e: Exception): Double? {
+    return if (retry < 5) Math.pow(2.0, retry.toDouble()) else null
+  }
+}
+
+class TenSecondTimeout : WithTimeout {
+  override fun getTimeoutSeconds(): Double = 10.0
+}
+
+@Retry(ExponentialBackoffRetry::class)
+class NotificationServiceImpl : NotificationService {
+  
+  @Timeout(TenSecondTimeout::class)
+  override fun sendEmail(email: String, subject: String, body: String): Boolean {
+    // Implementation
+    return true
+  }
+}
+```
+
+## Service Registration
+
+Services must be registered with a worker before they can execute tasks. Here's how to configure services in your worker:
+
+```kotlin
+import io.infinitic.workers.InfiniticWorker
+
+val worker = InfiniticWorker.builder()
+  .setTransport(/* your transport config */)
+  .addService(
+    name = "notifications",
+    factory = { NotificationServiceImpl() },
+    concurrency = 10
+  )
+  .build()
+
+worker.start()
+```
+
+### Configuration Options
+
+- **name**: The service name (must match the name used by clients)
+- **factory**: A lambda that creates service instances
+- **concurrency**: Number of parallel task executions (default: 1)
+- **withRetry**: Default retry policy for all methods
+- **withTimeout**: Default timeout for all methods
+
+## Best Practices
+
+### Keep Services Stateless
+
+Service instances should be stateless. Workers may create multiple instances for parallel execution, so storing state in instance variables can lead to unexpected behavior.
+
+```kotlin
+// ❌ Bad: Stateful service
+class NotificationServiceImpl : NotificationService {
+  private var emailCount = 0  // State shared across executions
+  
+  override fun sendEmail(email: String, subject: String, body: String): Boolean {
+    emailCount++
+    return true
+  }
+}
+
+// ✅ Good: Stateless service
+class NotificationServiceImpl : NotificationService {
+  override fun sendEmail(email: String, subject: String, body: String): Boolean {
+    // Use Task.meta for persistent metadata if needed
+    return true
+  }
+}
+```
+
+### Use Dependency Injection
+
+For services that need external dependencies, use the factory pattern:
+
+```kotlin
+class NotificationServiceImpl(
+  private val emailProvider: EmailProvider,
+  private val smsProvider: SmsProvider
+) : NotificationService {
+  // Implementation
+}
+
+val worker = InfiniticWorker.builder()
+  .addService(
+    name = "notifications",
+    factory = { 
+      NotificationServiceImpl(
+        emailProvider = MyEmailProvider(),
+        smsProvider = MySmsProvider()
+      )
+    }
+  )
+  .build()
+```
+
+### Handle Exceptions Appropriately
+
+Exceptions thrown from service methods trigger retry mechanisms. Use exceptions for transient failures but return error values for permanent failures:
+
+```kotlin
+class NotificationServiceImpl : NotificationService {
+  override fun sendEmail(email: String, subject: String, body: String): Boolean {
+    return try {
+      if (!isValidEmail(email)) {
+        // Permanent failure - don't retry
+        return false
+      }
+      
+      emailProvider.send(email, subject, body)
+      true
+    } catch (e: NetworkException) {
+      // Transient failure - will retry
+      throw e
+    }
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Defining Services" icon="code" href="/services/defining-services">
+    Learn the details of creating service interfaces and implementations
+  </Card>
+  <Card title="Service Context" icon="layer-group" href="/services/service-context">
+    Access task metadata, workflow information, and more
+  </Card>
+  <Card title="Delegated Tasks" icon="share-nodes" href="/services/delegated-tasks">
+    Integrate with external systems for long-running operations
+  </Card>
+  <Card title="Batching" icon="layer-group" href="/services/batching">
+    Process multiple tasks efficiently with batch operations
+  </Card>
+</CardGroup>

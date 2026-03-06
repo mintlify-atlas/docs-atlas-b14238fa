@@ -1,0 +1,348 @@
+---
+title: "@Batch"
+description: Enable batch processing for service methods
+---
+
+The `@Batch` annotation marks a service method as eligible for batch processing, allowing multiple invocations to be grouped together and processed as a single batch for improved efficiency.
+
+## Package
+
+```kotlin
+io.infinitic.annotations.Batch
+```
+
+## Targets
+
+- Methods (service methods only)
+
+## Overview
+
+Batch processing is useful when:
+- You need to make bulk API calls to external services
+- Database operations can be more efficient in batches
+- Network round-trips should be minimized
+- Resource utilization needs to be optimized
+
+## Usage
+
+### Basic Batch Method
+
+```kotlin
+import io.infinitic.annotations.Batch
+
+interface EmailService {
+  @Batch
+  fun sendEmail(to: String, subject: String, body: String)
+}
+```
+
+### Implementation
+
+Batch methods require both a single-item and batch implementation:
+
+```kotlin
+class EmailServiceImpl : EmailService {
+  // Single item version (called when not batched)
+  override fun sendEmail(to: String, subject: String, body: String) {
+    sendEmails(listOf(Email(to, subject, body)))
+  }
+  
+  // Batch version (called when items are batched)
+  fun sendEmails(emails: List<Email>) {
+    // Send all emails in one API call
+    emailProvider.sendBulk(emails)
+  }
+}
+```
+
+## Batch Method Signature
+
+The batch implementation method must:
+
+1. Have the same name as the single method with an "s" suffix (or be named explicitly)
+2. Accept a single `List<T>` parameter where T matches the single method's parameters
+3. Return `List<R>` where R matches the single method's return type
+
+### Example: Return Values
+
+```kotlin
+interface PaymentService {
+  @Batch
+  fun processPayment(amount: Double, cardToken: String): PaymentResult
+}
+
+class PaymentServiceImpl : PaymentService {
+  override fun processPayment(amount: Double, cardToken: String): PaymentResult {
+    return processPayments(listOf(PaymentRequest(amount, cardToken)))[0]
+  }
+  
+  // Batch implementation
+  fun processPayments(requests: List<PaymentRequest>): List<PaymentResult> {
+    // Process all payments in batch
+    return paymentGateway.processBatch(requests)
+  }
+}
+
+data class PaymentRequest(val amount: Double, val cardToken: String)
+```
+
+## Configuration
+
+Batch behavior is configured in the worker configuration:
+
+```yaml
+services:
+  - name: EmailService
+    class: com.example.EmailServiceImpl
+    executor:
+      concurrency: 10
+      batch:
+        maxMessages: 100      # Max items in a batch
+        maxSeconds: 1.0       # Max time to wait for batch
+```
+
+### Batch Configuration Parameters
+
+<ParamField path="maxMessages" type="Int">
+  Maximum number of messages to include in a batch
+  
+  When this limit is reached, the batch is processed immediately.
+</ParamField>
+
+<ParamField path="maxSeconds" type="Double">
+  Maximum time (in seconds) to wait before processing a batch
+  
+  If this timeout is reached, the current batch is processed even if maxMessages hasn't been reached.
+</ParamField>
+
+## Usage in Workflows
+
+```kotlin
+class NotificationWorkflowImpl : Workflow(), NotificationWorkflow {
+  override fun sendBulkNotifications(users: List<User>) {
+    val emailService = newService(EmailService::class.java)
+    
+    // These calls will be automatically batched
+    val deferreds = users.map { user ->
+      dispatch(emailService::sendEmail, 
+        user.email, 
+        "Welcome", 
+        "Welcome to our service!")
+    }
+    
+    // Wait for all to complete
+    deferreds.map { it.await() }
+  }
+}
+```
+
+In this example, if 100 users are processed:
+- Without batching: 100 individual email API calls
+- With batching: 1 bulk email API call (if configured properly)
+
+## Advanced Example: Database Operations
+
+```kotlin
+import io.infinitic.annotations.Batch
+
+interface UserRepository {
+  @Batch
+  fun saveUser(user: User): User
+  
+  @Batch
+  fun findUserById(id: String): User?
+}
+
+class UserRepositoryImpl : UserRepository {
+  override fun saveUser(user: User): User {
+    return saveUsers(listOf(user))[0]
+  }
+  
+  fun saveUsers(users: List<User>): List<User> {
+    // Batch insert
+    return database.batchInsert(users)
+  }
+  
+  override fun findUserById(id: String): User? {
+    return findUsersByIds(listOf(id))[0]
+  }
+  
+  fun findUsersByIds(ids: List<String>): List<User?> {
+    // Batch select with IN clause
+    return database.query("SELECT * FROM users WHERE id IN (?)", ids)
+  }
+}
+```
+
+## Batching Strategies
+
+### Time-Based Batching
+
+```yaml
+batch:
+  maxMessages: 1000
+  maxSeconds: 0.5  # Process every 500ms
+```
+
+Good for:
+- High-throughput scenarios
+- When latency is not critical
+- Maximizing efficiency of bulk operations
+
+### Size-Based Batching
+
+```yaml
+batch:
+  maxMessages: 50
+  maxSeconds: 10.0  # Long timeout, rely on size
+```
+
+Good for:
+- API rate limiting
+- When batch size is more important than latency
+- External services with batch size limits
+
+### Balanced Batching
+
+```yaml
+batch:
+  maxMessages: 100
+  maxSeconds: 1.0
+```
+
+Good for:
+- General purpose batching
+- Balancing latency and efficiency
+- Most production scenarios
+
+## Error Handling in Batches
+
+When a batch fails, individual items can be retried:
+
+```kotlin
+class EmailServiceImpl : EmailService {
+  fun sendEmails(emails: List<Email>): List<EmailResult> {
+    return try {
+      emailProvider.sendBulk(emails)
+    } catch (e: BulkSendException) {
+      // Some emails failed, return individual results
+      e.results.map { result ->
+        if (result.failed) {
+          // This specific email will be retried individually
+          throw EmailSendException(result.error)
+        } else {
+          EmailResult.success()
+        }
+      }
+    }
+  }
+}
+```
+
+## Performance Considerations
+
+### Benefits
+
+- Reduced network overhead (fewer API calls)
+- Better resource utilization (database connection pooling)
+- Lower latency for bulk operations
+- Improved throughput
+
+### Trade-offs
+
+- Slightly increased latency for individual items (waiting for batch)
+- More complex error handling
+- Requires batch-capable external services
+- Memory usage increases with batch size
+
+## Best Practices
+
+1. **Choose appropriate batch sizes**: Balance between efficiency and memory usage
+2. **Set reasonable timeouts**: Don't make individual items wait too long
+3. **Handle partial failures**: Return meaningful results for each item
+4. **Monitor batch efficiency**: Track batch sizes and processing times
+5. **Test batch boundaries**: Ensure single-item and full-batch cases work
+6. **Consider idempotency**: Batch operations should be safe to retry
+7. **Document batch behavior**: Make batching transparent to clients
+
+## Complete Example
+
+```kotlin
+import io.infinitic.annotations.Batch
+import io.infinitic.annotations.Retry
+import io.infinitic.annotations.Timeout
+
+@Timeout(with = StandardTimeout::class)
+@Retry(with = StandardRetryPolicy::class)
+interface NotificationService {
+  @Batch
+  fun sendPushNotification(userId: String, message: String): NotificationResult
+  
+  @Batch
+  fun sendSMS(phoneNumber: String, message: String): SMSResult
+}
+
+class NotificationServiceImpl : NotificationService {
+  override fun sendPushNotification(
+    userId: String,
+    message: String
+  ): NotificationResult {
+    val request = PushRequest(userId, message)
+    return sendPushNotifications(listOf(request))[0]
+  }
+  
+  fun sendPushNotifications(
+    requests: List<PushRequest>
+  ): List<NotificationResult> {
+    logger.info("Sending ${requests.size} push notifications in batch")
+    
+    try {
+      // Send batch to push notification service
+      val responses = pushService.sendBatch(requests)
+      
+      return responses.map { response ->
+        if (response.success) {
+          NotificationResult.success(response.messageId)
+        } else {
+          // Individual failures will be retried
+          throw NotificationException(response.error)
+        }
+      }
+    } catch (e: Exception) {
+      logger.error("Batch send failed: ${e.message}")
+      throw e
+    }
+  }
+  
+  override fun sendSMS(phoneNumber: String, message: String): SMSResult {
+    return sendSMSBatch(listOf(SMSRequest(phoneNumber, message)))[0]
+  }
+  
+  fun sendSMSBatch(requests: List<SMSRequest>): List<SMSResult> {
+    logger.info("Sending ${requests.size} SMS messages in batch")
+    return smsProvider.sendBulk(requests)
+  }
+}
+
+data class PushRequest(val userId: String, val message: String)
+data class SMSRequest(val phoneNumber: String, val message: String)
+```
+
+### Configuration
+
+```yaml
+services:
+  - name: NotificationService
+    class: com.example.NotificationServiceImpl
+    executor:
+      concurrency: 20
+      batch:
+        maxMessages: 100
+        maxSeconds: 0.5
+```
+
+## See Also
+
+- [Worker Configuration](/api/config/worker-config) - For batch configuration
+- [Retry Annotation](/api/annotations/retry) - For retry policies
+- [Timeout Annotation](/api/annotations/timeout) - For timeout configuration

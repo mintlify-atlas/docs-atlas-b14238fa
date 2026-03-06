@@ -1,0 +1,340 @@
+---
+title: Client Configuration
+description: Configure Infinitic clients to submit tasks and workflows
+---
+
+Clients are used to submit tasks and workflows to Infinitic workers. They require only transport configuration.
+
+## Basic Structure
+
+```yaml
+name: my-client              # Optional client name
+
+transport:                   # Required: Message transport configuration
+  pulsar: ...               # or inMemory
+```
+
+## YAML Configuration
+
+### Minimal Configuration
+
+```yaml
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://localhost:6650
+    webServiceUrl: http://localhost:8080
+    tenant: infinitic
+    namespace: dev
+```
+
+### With Client Name
+
+```yaml
+name: order-service-client
+
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://localhost:6650
+    webServiceUrl: http://localhost:8080
+    tenant: infinitic
+    namespace: dev
+```
+
+### Production Configuration
+
+```yaml
+name: production-client
+
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://pulsar.example.com:6650
+    webServiceUrl: http://pulsar.example.com:8080
+    tenant: infinitic
+    namespace: production
+    shutdownGracePeriodSeconds: 30.0
+    client:
+      operationTimeout: 30
+      connectionTimeout: 10
+      requestTimeout: 60
+```
+
+## Programmatic Configuration
+
+### Using Builder Pattern
+
+```java
+import io.infinitic.clients.InfiniticClient;
+import io.infinitic.clients.config.InfiniticClientConfig;
+import io.infinitic.transport.config.PulsarTransportConfig;
+
+PulsarTransportConfig transport = PulsarTransportConfig.builder()
+    .setBrokerServiceUrl("pulsar://localhost:6650")
+    .setWebServiceUrl("http://localhost:8080")
+    .setTenant("infinitic")
+    .setNamespace("dev")
+    .build();
+
+InfiniticClientConfig config = new InfiniticClientConfig(
+    "my-client",  // name (optional)
+    transport
+);
+
+InfiniticClient client = InfiniticClient.fromConfig(config);
+```
+
+### Using Data Class
+
+```kotlin
+import io.infinitic.clients.config.InfiniticClientConfig
+import io.infinitic.transport.config.PulsarTransportConfig
+
+val config = InfiniticClientConfig(
+    name = "my-client",
+    transport = PulsarTransportConfig(
+        pulsar = PulsarConfig(
+            brokerServiceUrl = "pulsar://localhost:6650",
+            webServiceUrl = "http://localhost:8080",
+            tenant = "infinitic",
+            namespace = "dev"
+        )
+    )
+)
+```
+
+## Loading Configuration
+
+### From YAML File
+
+```java
+import io.infinitic.clients.InfiniticClient;
+import io.infinitic.clients.config.InfiniticClientConfig;
+
+// Load from file system
+InfiniticClientConfig config = InfiniticClientConfig.fromYamlFile("client.yml");
+InfiniticClient client = InfiniticClient.fromConfig(config);
+
+// Load from multiple files (merged)
+InfiniticClientConfig config = InfiniticClientConfig.fromYamlFile(
+    "base.yml",
+    "environment.yml"
+);
+```
+
+### From Resource
+
+```java
+// Load from classpath resources
+InfiniticClientConfig config = InfiniticClientConfig.fromYamlResource(
+    "infinitic-client.yml"
+);
+InfiniticClient client = InfiniticClient.fromConfig(config);
+```
+
+### From String
+
+```java
+// Load from YAML string
+String yaml = """
+    name: my-client
+    transport:
+      pulsar:
+        brokerServiceUrl: pulsar://localhost:6650
+        webServiceUrl: http://localhost:8080
+        tenant: infinitic
+        namespace: dev
+    """;
+
+InfiniticClientConfig config = InfiniticClientConfig.fromYamlString(yaml);
+InfiniticClient client = InfiniticClient.fromConfig(config);
+```
+
+## Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `name` | String | null | Optional client identifier for logging and monitoring |
+| `transport` | Object | Required | Transport configuration (see [Transport Configuration](/configuration/transport)) |
+
+## Using the Client
+
+### Creating a Client Instance
+
+```java
+import io.infinitic.clients.InfiniticClient;
+
+// Create client from configuration
+InfiniticClient client = InfiniticClient.fromConfig(config);
+```
+
+### Dispatching Tasks
+
+```java
+import io.infinitic.clients.InfiniticClient;
+
+// Get a service stub
+MyService service = client.newService(MyService.class);
+
+// Dispatch a task asynchronously
+Deferred<String> deferred = client.dispatch(service::processOrder, orderId);
+
+// Wait for result
+String result = deferred.await();
+```
+
+### Starting Workflows
+
+```java
+import io.infinitic.clients.InfiniticClient;
+
+// Get a workflow stub
+MyWorkflow workflow = client.newWorkflow(MyWorkflow.class);
+
+// Start workflow asynchronously
+Deferred<OrderResult> deferred = client.dispatch(workflow::processOrder, order);
+
+// Get workflow ID
+String workflowId = deferred.getId();
+
+// Wait for result
+OrderResult result = deferred.await();
+```
+
+### Using Tags
+
+```java
+import io.infinitic.clients.InfiniticClient;
+
+// Get workflow stub with tag
+MyWorkflow workflow = client.newWorkflow(
+    MyWorkflow.class,
+    tags = Set.of("order:" + orderId)
+);
+
+// Start workflow
+client.dispatch(workflow::process, order);
+
+// Later, get workflow by tag
+MyWorkflow existing = client.getWorkflowByTag(
+    MyWorkflow.class,
+    "order:" + orderId
+);
+```
+
+## Multiple Environments
+
+You can create different configurations for different environments:
+
+### Development
+
+```yaml
+# client-dev.yml
+name: dev-client
+
+transport:
+  inMemory:
+    shutdownGracePeriodSeconds: 5.0
+```
+
+### Staging
+
+```yaml
+# client-staging.yml
+name: staging-client
+
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://staging.example.com:6650
+    webServiceUrl: http://staging.example.com:8080
+    tenant: infinitic
+    namespace: staging
+```
+
+### Production
+
+```yaml
+# client-production.yml
+name: production-client
+
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://pulsar.example.com:6650
+    webServiceUrl: http://pulsar.example.com:8080
+    tenant: infinitic
+    namespace: production
+    shutdownGracePeriodSeconds: 30.0
+    client:
+      operationTimeout: 30
+      connectionTimeout: 10
+      requestTimeout: 60
+      keepAliveInterval: 30
+```
+
+## Environment Variables
+
+You can use environment variable interpolation in YAML:
+
+```yaml
+name: ${CLIENT_NAME:-default-client}
+
+transport:
+  pulsar:
+    brokerServiceUrl: ${PULSAR_BROKER_URL}
+    webServiceUrl: ${PULSAR_WEB_URL}
+    tenant: ${PULSAR_TENANT:-infinitic}
+    namespace: ${PULSAR_NAMESPACE:-dev}
+    client:
+      authPluginClassName: ${PULSAR_AUTH_PLUGIN:-}
+      authParams: ${PULSAR_AUTH_PARAMS:-}
+```
+
+## Client Lifecycle
+
+### Starting the Client
+
+```java
+InfiniticClient client = InfiniticClient.fromConfig(config);
+// Client is ready to use immediately
+```
+
+### Closing the Client
+
+```java
+// Close the client when done
+client.close();
+
+// Or use try-with-resources
+try (InfiniticClient client = InfiniticClient.fromConfig(config)) {
+    // Use client
+}
+```
+
+## Best Practices
+
+### Connection Pooling
+
+- **Reuse client instances** - Create one client per application, not per request
+- **Connection sharing** - Multiple threads can safely share a single client instance
+- **Proper shutdown** - Always close clients to release resources
+
+### Configuration Management
+
+- **Externalize configuration** - Keep configuration files separate from code
+- **Environment-specific configs** - Use different files for dev/staging/production
+- **Secret management** - Use environment variables for sensitive data
+
+### Error Handling
+
+```java
+try {
+    InfiniticClient client = InfiniticClient.fromConfig(config);
+    // Use client
+} catch (Exception e) {
+    // Handle connection errors
+    logger.error("Failed to create client", e);
+}
+```
+
+## See Also
+
+- [Transport Configuration](/configuration/transport) - Configure message transport
+- [Worker Configuration](/configuration/workers) - Configure workers to process tasks

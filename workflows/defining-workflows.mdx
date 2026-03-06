@@ -1,0 +1,297 @@
+---
+title: Defining Workflows
+description: Learn how to create and structure Infinitic workflows
+---
+
+Workflows in Infinitic are defined using an interface and implementation pattern, extending the base `Workflow` class.
+
+## Basic Structure
+
+<Steps>
+  <Step title="Define the workflow interface">
+    Create an interface that declares the workflow methods:
+
+    ```kotlin
+    interface OrderWorkflow {
+      fun processOrder(orderId: String): OrderResult
+      fun cancelOrder(orderId: String): Unit
+    }
+    ```
+  </Step>
+
+  <Step title="Implement the workflow class">
+    Create a class that extends `Workflow` and implements your interface:
+
+    ```kotlin
+    import io.infinitic.workflows.Workflow
+
+    class OrderWorkflowImpl : Workflow(), OrderWorkflow {
+      override fun processOrder(orderId: String): OrderResult {
+        // Workflow logic here
+      }
+      
+      override fun cancelOrder(orderId: String) {
+        // Cancellation logic here
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Create service stubs">
+    Use `newService()` to create stubs for services you'll call:
+
+    ```kotlin
+    class OrderWorkflowImpl : Workflow(), OrderWorkflow {
+      private val inventoryService = newService(InventoryService::class.java)
+      private val paymentService = newService(PaymentService::class.java)
+      private val shippingService = newService(ShippingService::class.java)
+      
+      // ...
+    }
+    ```
+  </Step>
+</Steps>
+
+## Complete Example
+
+<CodeGroup>
+```kotlin Kotlin
+import io.infinitic.workflows.Workflow
+
+interface OrderWorkflow {
+  fun processOrder(orderId: String, userId: String): OrderResult
+}
+
+class OrderWorkflowImpl : Workflow(), OrderWorkflow {
+  
+  // Create service stubs
+  private val inventoryService = newService(InventoryService::class.java)
+  private val paymentService = newService(PaymentService::class.java)
+  private val shippingService = newService(ShippingService::class.java)
+  
+  override fun processOrder(orderId: String, userId: String): OrderResult {
+    // 1. Check inventory
+    val items = inventoryService.checkAvailability(orderId)
+    
+    // 2. Calculate total
+    val total = items.sumOf { it.price }
+    
+    // 3. Process payment
+    val payment = paymentService.charge(userId, total)
+    
+    // 4. Reserve items
+    inventoryService.reserve(orderId, items)
+    
+    // 5. Ship order
+    val tracking = shippingService.ship(orderId, userId)
+    
+    return OrderResult(orderId, payment, tracking)
+  }
+}
+```
+
+```java Java
+import io.infinitic.workflows.Workflow;
+import java.util.List;
+
+public interface OrderWorkflow {
+  OrderResult processOrder(String orderId, String userId);
+}
+
+public class OrderWorkflowImpl extends Workflow implements OrderWorkflow {
+  
+  // Create service stubs
+  private final InventoryService inventoryService = 
+      newService(InventoryService.class);
+  private final PaymentService paymentService = 
+      newService(PaymentService.class);
+  private final ShippingService shippingService = 
+      newService(ShippingService.class);
+  
+  @Override
+  public OrderResult processOrder(String orderId, String userId) {
+    // 1. Check inventory
+    List<Item> items = inventoryService.checkAvailability(orderId);
+    
+    // 2. Calculate total
+    double total = items.stream()
+        .mapToDouble(Item::getPrice)
+        .sum();
+    
+    // 3. Process payment
+    Payment payment = paymentService.charge(userId, total);
+    
+    // 4. Reserve items
+    inventoryService.reserve(orderId, items);
+    
+    // 5. Ship order
+    String tracking = shippingService.ship(orderId, userId);
+    
+    return new OrderResult(orderId, payment, tracking);
+  }
+}
+```
+</CodeGroup>
+
+## Service Stubs with Tags and Metadata
+
+You can create service stubs with tags and metadata for routing and context:
+
+```kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  
+  // Service with tags for routing
+  private val taggedService = newService(
+    UtilService::class.java,
+    tags = setOf("priority-high", "region-us-east"),
+    meta = mapOf("requestId" to "12345".toByteArray())
+  )
+  
+  override fun process() {
+    // Calls will be routed to workers with matching tags
+    taggedService.doWork()
+  }
+}
+```
+
+## Workflow Properties
+
+Workflows can have properties, but be careful with their usage:
+
+```kotlin
+class OrderWorkflowImpl : Workflow(), OrderWorkflow {
+  
+  // Service stubs (safe as properties)
+  private val paymentService = newService(PaymentService::class.java)
+  
+  // Simple state (safe)
+  private var orderTotal: Double = 0.0
+  private val items = mutableListOf<Item>()
+  
+  // Deferred objects should NOT be properties
+  // ❌ Wrong: lateinit var deferred: Deferred<String>
+  
+  override fun processOrder(orderId: String): OrderResult {
+    // Use deferred objects locally within methods
+    val deferred = dispatch(paymentService::charge, orderId)
+    val result = deferred.await()
+    return result
+  }
+}
+```
+
+<Warning>
+  **Deferred Objects as Properties**
+  
+  Do not store `Deferred<T>` objects as workflow properties. Always use them locally within workflow methods.
+  
+  ```kotlin
+  // ❌ Wrong
+  class MyWorkflow : Workflow(), MyWorkflowInterface {
+    lateinit var deferred: Deferred<String>
+  }
+  
+  // ✅ Correct
+  class MyWorkflow : Workflow(), MyWorkflowInterface {
+    override fun process(): String {
+      val deferred = dispatch(service::method)
+      return deferred.await()
+    }
+  }
+  ```
+</Warning>
+
+## Creating Workflow Stubs
+
+Workflows can create stubs for other workflows:
+
+```kotlin
+class ParentWorkflow : Workflow(), ParentWorkflowInterface {
+  
+  // Create a stub for a child workflow
+  private val childWorkflow = newWorkflow(ChildWorkflow::class.java)
+  
+  // With tags and metadata
+  private val taggedWorkflow = newWorkflow(
+    ChildWorkflow::class.java,
+    tags = setOf("important"),
+    meta = mapOf("parentId" to workflowId.toByteArray())
+  )
+  
+  override fun execute() {
+    // Call child workflow synchronously
+    val result = childWorkflow.process()
+    
+    // Call child workflow asynchronously
+    val deferred = dispatch(childWorkflow::process)
+    val result2 = deferred.await()
+  }
+}
+```
+
+## Accessing Context
+
+Workflows can access contextual information during execution:
+
+```kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  
+  override fun logContext() {
+    // Access static context properties
+    println("Workflow Name: ${Workflow.workflowName}")
+    println("Workflow ID: ${Workflow.workflowId}")
+    println("Method Name: ${Workflow.methodName}")
+    println("Method ID: ${Workflow.methodId}")
+    println("Tags: ${Workflow.tags}")
+    println("Meta: ${Workflow.meta}")
+  }
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep workflows focused">
+    Each workflow should handle a single business process. Break complex processes into multiple workflows using sub-workflows.
+  </Accordion>
+  
+  <Accordion title="Use meaningful names">
+    Name your workflow interfaces and classes clearly to indicate their purpose:
+    - `OrderProcessingWorkflow`, not `Workflow1`
+    - `UserOnboardingWorkflow`, not `UserWF`
+  </Accordion>
+  
+  <Accordion title="Initialize service stubs as properties">
+    Create service stubs as class properties so they're initialized once:
+    ```kotlin
+    class MyWorkflow : Workflow(), MyWorkflowInterface {
+      private val service = newService(MyService::class.java)
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Avoid stateful operations">
+    Workflows can be replayed, so avoid operations with side effects:
+    - Don't generate random numbers
+    - Don't call `System.currentTimeMillis()`
+    - Don't make direct HTTP calls
+    - Use services for all external interactions
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Workflow Methods" icon="function" href="/workflows/workflow-methods">
+    Learn about available workflow methods
+  </Card>
+  <Card title="Calling Services" icon="server" href="/workflows/calling-services">
+    Understand how to call services from workflows
+  </Card>
+  <Card title="Sub-workflows" icon="sitemap" href="/workflows/sub-workflows">
+    Compose workflows from other workflows
+  </Card>
+  <Card title="Channels" icon="tower-broadcast" href="/workflows/channels">
+    Receive external signals
+  </Card>
+</CardGroup>

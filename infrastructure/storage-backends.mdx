@@ -1,0 +1,661 @@
+---
+title: Storage Backends
+description: Configure persistent storage for Infinitic state management
+---
+
+Infinitic requires a storage backend to persist workflow and task state. This ensures reliability, enables recovery from failures, and maintains consistency across distributed workers.
+
+## Overview
+
+Infinitic supports multiple storage backends:
+
+- **Redis** - Fast, in-memory data store (recommended for most use cases)
+- **PostgreSQL** - Reliable relational database
+- **MySQL** - Popular relational database
+- **In-Memory** - For development and testing only
+
+The storage configuration is defined in your YAML configuration file under the `storage` section.
+
+## What Gets Stored
+
+Infinitic persists:
+
+- **Workflow state** - Current workflow execution state and history
+- **Task state** - Task execution status and results
+- **Deferred messages** - Scheduled tasks and timers
+- **Tags** - Custom identifiers for workflows and tasks
+
+## Redis Storage
+
+Redis is the recommended storage backend for production use, offering excellent performance and reliability.
+
+### Basic Configuration
+
+```yaml
+storage:
+  redis:
+    host: localhost
+    port: 6379
+```
+
+### Complete Configuration
+
+```yaml
+storage:
+  redis:
+    host: redis.example.com
+    port: 6379
+    username: infinitic
+    password: ${REDIS_PASSWORD}
+    database: 0
+    timeout: 2000
+    ssl: true
+    poolConfig:
+      maxTotal: 50
+      maxIdle: 20
+      minIdle: 5
+  compression: gzip
+  cache:
+    keyValue:
+      maximumSize: 10000
+      expireAfterAccessSeconds: 3600
+```
+
+### Redis Parameters
+
+<ParamField path="redis.host" type="string" required>
+  Redis server hostname or IP address. Cannot be blank.
+  
+  **Example:** `localhost` or `redis.example.com`
+</ParamField>
+
+<ParamField path="redis.port" type="integer" required>
+  Redis server port number. Must be greater than 0.
+  
+  **Default:** `6379`
+</ParamField>
+
+<ParamField path="redis.username" type="string">
+  Username for Redis authentication (Redis 6+).
+</ParamField>
+
+<ParamField path="redis.password" type="string">
+  Password for Redis authentication.
+</ParamField>
+
+<ParamField path="redis.database" type="integer">
+  Redis database index to use. Must be >= 0.
+  
+  **Default:** `0`
+</ParamField>
+
+<ParamField path="redis.timeout" type="integer">
+  Socket timeout in milliseconds.
+  
+  **Default:** `2000`
+</ParamField>
+
+<ParamField path="redis.ssl" type="boolean">
+  Enable SSL/TLS connection to Redis.
+  
+  **Default:** `false`
+</ParamField>
+
+### Connection Pool Configuration
+
+<ParamField path="redis.poolConfig.maxTotal" type="integer">
+  Maximum number of connections in the pool. Use -1 for unlimited.
+  
+  **Default:** `-1`
+</ParamField>
+
+<ParamField path="redis.poolConfig.maxIdle" type="integer">
+  Maximum number of idle connections in the pool.
+  
+  **Default:** `8`
+</ParamField>
+
+<ParamField path="redis.poolConfig.minIdle" type="integer">
+  Minimum number of idle connections to maintain.
+  
+  **Default:** `0`
+</ParamField>
+
+### Configuration via Code
+
+<CodeGroup>
+```kotlin Kotlin
+import io.infinitic.storage.config.RedisStorageConfig
+import io.infinitic.storage.config.RedisConfig
+
+val storage = RedisStorageConfig(
+    redis = RedisConfig(
+        host = "redis.example.com",
+        port = 6379,
+        password = System.getenv("REDIS_PASSWORD"),
+        ssl = true
+    )
+)
+```
+
+```java Java
+import io.infinitic.storage.config.RedisStorageConfig;
+import io.infinitic.storage.config.RedisConfig;
+
+RedisStorageConfig storage = RedisStorageConfig.builder()
+    .setHost("redis.example.com")
+    .setPort(6379)
+    .setPassword(System.getenv("REDIS_PASSWORD"))
+    .setSsl(true)
+    .build();
+```
+</CodeGroup>
+
+## PostgreSQL Storage
+
+PostgreSQL provides ACID-compliant persistent storage with excellent reliability.
+
+### Basic Configuration
+
+```yaml
+storage:
+  postgres:
+    host: localhost
+    port: 5432
+    username: infinitic
+    password: ${POSTGRES_PASSWORD}
+```
+
+### Complete Configuration
+
+```yaml
+storage:
+  postgres:
+    host: postgres.example.com
+    port: 5432
+    username: infinitic
+    password: ${POSTGRES_PASSWORD}
+    database: infinitic
+    schema: infinitic
+    keySetTable: key_set_storage
+    keyValueTable: key_value_storage
+    maximumPoolSize: 20
+    minimumIdle: 5
+    idleTimeout: 600000
+    connectionTimeout: 30000
+    maxLifetime: 1800000
+  compression: gzip
+```
+
+### PostgreSQL Parameters
+
+<ParamField path="postgres.host" type="string" required>
+  PostgreSQL server hostname or IP address.
+  
+  **Example:** `localhost` or `postgres.example.com`
+</ParamField>
+
+<ParamField path="postgres.port" type="integer" required>
+  PostgreSQL server port number.
+  
+  **Default:** `5432`
+</ParamField>
+
+<ParamField path="postgres.username" type="string" required>
+  Database username for authentication.
+</ParamField>
+
+<ParamField path="postgres.password" type="string">
+  Database password for authentication.
+</ParamField>
+
+<ParamField path="postgres.database" type="string">
+  Database name. Must be a valid PostgreSQL database name.
+  
+  **Default:** `postgres`
+</ParamField>
+
+<ParamField path="postgres.schema" type="string">
+  Schema name within the database. Created automatically if it doesn't exist.
+  
+  **Default:** `infinitic`
+</ParamField>
+
+<ParamField path="postgres.keySetTable" type="string">
+  Table name for key-set storage. Created automatically if it doesn't exist.
+  
+  **Default:** `key_set_storage`
+</ParamField>
+
+<ParamField path="postgres.keyValueTable" type="string">
+  Table name for key-value storage. Created automatically if it doesn't exist.
+  
+  **Default:** `key_value_storage`
+</ParamField>
+
+### Connection Pool Parameters
+
+<ParamField path="postgres.maximumPoolSize" type="integer">
+  Maximum number of connections in the HikariCP pool. Must be > 0.
+  
+  **Default:** HikariCP default (10)
+</ParamField>
+
+<ParamField path="postgres.minimumIdle" type="integer">
+  Minimum number of idle connections. Must be >= 0.
+  
+  **Default:** HikariCP default (same as maximumPoolSize)
+</ParamField>
+
+<ParamField path="postgres.idleTimeout" type="integer">
+  Maximum time (in milliseconds) a connection can sit idle in the pool. Must be > 0.
+  
+  **Default:** HikariCP default (600000ms / 10 minutes)
+</ParamField>
+
+<ParamField path="postgres.connectionTimeout" type="integer">
+  Maximum time (in milliseconds) to wait for a connection from the pool. Must be > 0.
+  
+  **Default:** HikariCP default (30000ms / 30 seconds)
+</ParamField>
+
+<ParamField path="postgres.maxLifetime" type="integer">
+  Maximum lifetime (in milliseconds) of a connection in the pool. Must be > 0.
+  
+  **Default:** HikariCP default (1800000ms / 30 minutes)
+</ParamField>
+
+### Database Setup
+
+Infinitic automatically creates the database, schema, and tables if they don't exist. Ensure the configured user has appropriate permissions:
+
+```sql
+-- Create database and user
+CREATE DATABASE infinitic;
+CREATE USER infinitic WITH PASSWORD 'your_password';
+
+-- Grant permissions
+GRANT ALL PRIVILEGES ON DATABASE infinitic TO infinitic;
+
+-- Connect to database and grant schema permissions
+\c infinitic
+GRANT ALL ON SCHEMA infinitic TO infinitic;
+```
+
+### Configuration via Code
+
+<CodeGroup>
+```kotlin Kotlin
+import io.infinitic.storage.config.PostgresStorageConfig
+import io.infinitic.storage.config.PostgresConfig
+
+val storage = PostgresStorageConfig(
+    postgres = PostgresConfig(
+        host = "postgres.example.com",
+        port = 5432,
+        username = "infinitic",
+        password = System.getenv("POSTGRES_PASSWORD"),
+        database = "infinitic",
+        maximumPoolSize = 20
+    )
+)
+```
+
+```java Java
+import io.infinitic.storage.config.PostgresStorageConfig;
+
+PostgresStorageConfig storage = PostgresStorageConfig.builder()
+    .setHost("postgres.example.com")
+    .setPort(5432)
+    .setUsername("infinitic")
+    .setPassword(System.getenv("POSTGRES_PASSWORD"))
+    .setDatabase("infinitic")
+    .setMaximumPoolSize(20)
+    .build();
+```
+</CodeGroup>
+
+## MySQL Storage
+
+MySQL provides reliable persistent storage with wide adoption.
+
+### Basic Configuration
+
+```yaml
+storage:
+  mysql:
+    host: localhost
+    port: 3306
+    username: infinitic
+    password: ${MYSQL_PASSWORD}
+```
+
+### Complete Configuration
+
+```yaml
+storage:
+  mysql:
+    host: mysql.example.com
+    port: 3306
+    username: infinitic
+    password: ${MYSQL_PASSWORD}
+    database: infinitic
+    keySetTable: key_set_storage
+    keyValueTable: key_value_storage
+    maximumPoolSize: 20
+    minimumIdle: 5
+    idleTimeout: 600000
+    connectionTimeout: 30000
+    maxLifetime: 1800000
+  compression: gzip
+```
+
+### MySQL Parameters
+
+<ParamField path="mysql.host" type="string" required>
+  MySQL server hostname or IP address.
+  
+  **Example:** `localhost` or `mysql.example.com`
+</ParamField>
+
+<ParamField path="mysql.port" type="integer" required>
+  MySQL server port number.
+  
+  **Default:** `3306`
+</ParamField>
+
+<ParamField path="mysql.username" type="string" required>
+  Database username for authentication.
+</ParamField>
+
+<ParamField path="mysql.password" type="string">
+  Database password for authentication.
+</ParamField>
+
+<ParamField path="mysql.database" type="string">
+  Database name. Must be a valid MySQL database name.
+  
+  **Default:** `infinitic`
+</ParamField>
+
+<ParamField path="mysql.keySetTable" type="string">
+  Table name for key-set storage. Created automatically if it doesn't exist.
+  
+  **Default:** `key_set_storage`
+</ParamField>
+
+<ParamField path="mysql.keyValueTable" type="string">
+  Table name for key-value storage. Created automatically if it doesn't exist.
+  
+  **Default:** `key_value_storage`
+</ParamField>
+
+Connection pool parameters for MySQL are identical to PostgreSQL (see above).
+
+### Database Setup
+
+```sql
+-- Create database and user
+CREATE DATABASE infinitic;
+CREATE USER 'infinitic'@'%' IDENTIFIED BY 'your_password';
+
+-- Grant permissions
+GRANT ALL PRIVILEGES ON infinitic.* TO 'infinitic'@'%';
+FLUSH PRIVILEGES;
+```
+
+### Configuration via Code
+
+<CodeGroup>
+```kotlin Kotlin
+import io.infinitic.storage.config.MySQLStorageConfig
+import io.infinitic.storage.config.MySQLConfig
+
+val storage = MySQLStorageConfig(
+    mysql = MySQLConfig(
+        host = "mysql.example.com",
+        port = 3306,
+        username = "infinitic",
+        password = System.getenv("MYSQL_PASSWORD"),
+        database = "infinitic"
+    )
+)
+```
+
+```java Java
+import io.infinitic.storage.config.MySQLStorageConfig;
+
+MySQLStorageConfig storage = MySQLStorageConfig.builder()
+    .setHost("mysql.example.com")
+    .setPort(3306)
+    .setUsername("infinitic")
+    .setPassword(System.getenv("MYSQL_PASSWORD"))
+    .setDatabase("infinitic")
+    .build();
+```
+</CodeGroup>
+
+## In-Memory Storage
+
+<Warning>
+  In-memory storage is only suitable for development and testing. All data is lost when the application stops.
+</Warning>
+
+```yaml
+storage:
+  inMemory:
+```
+
+This backend requires no configuration and stores everything in memory. Use only for local development.
+
+## Data Compression
+
+Enable compression to reduce storage size and network bandwidth:
+
+```yaml
+storage:
+  redis:
+    # ... redis config
+  compression: gzip  # Options: gzip, bzip2, deflate
+```
+
+<ParamField path="compression" type="string">
+  Compression algorithm for stored data.
+  
+  **Options:**
+  - `gzip` - Good balance of speed and compression ratio (recommended)
+  - `bzip2` - Better compression, slower
+  - `deflate` - Similar to gzip
+  
+  **Default:** No compression
+</ParamField>
+
+Compression is particularly beneficial for:
+- Large workflow states
+- Workflows with significant data payloads
+- Reducing network transfer costs
+
+## Caching
+
+Enable in-memory caching to reduce database load:
+
+```yaml
+storage:
+  redis:
+    # ... redis config
+  cache:
+    keyValue:
+      maximumSize: 10000
+      expireAfterAccessSeconds: 3600
+    keySet:
+      maximumSize: 1000
+      expireAfterAccessSeconds: 1800
+```
+
+### Cache Parameters
+
+<ParamField path="cache.keyValue.maximumSize" type="integer">
+  Maximum number of key-value entries to cache.
+  
+  **Default:** No caching
+</ParamField>
+
+<ParamField path="cache.keyValue.expireAfterAccessSeconds" type="integer">
+  Seconds after last access to expire cached entries.
+  
+  **Default:** No expiration
+</ParamField>
+
+<ParamField path="cache.keySet.maximumSize" type="integer">
+  Maximum number of key-set entries to cache.
+  
+  **Default:** No caching
+</ParamField>
+
+<ParamField path="cache.keySet.expireAfterAccessSeconds" type="integer">
+  Seconds after last access to expire cached entries.
+  
+  **Default:** No expiration
+</ParamField>
+
+## Storage Selection Guide
+
+### Choose Redis when:
+
+- You need high performance with sub-millisecond latency
+- Your infrastructure already uses Redis
+- You want simplicity with excellent performance
+- Memory cost is acceptable for your data size
+
+### Choose PostgreSQL when:
+
+- You need ACID compliance and strong consistency
+- You prefer relational databases
+- You have existing PostgreSQL infrastructure
+- Long-term data retention is critical
+- You need complex querying capabilities
+
+### Choose MySQL when:
+
+- Your organization standardizes on MySQL
+- You have existing MySQL expertise and infrastructure
+- Requirements are similar to PostgreSQL
+
+## Production Best Practices
+
+### High Availability
+
+- **Redis**: Use Redis Cluster or Redis Sentinel for HA
+- **PostgreSQL**: Configure streaming replication with automatic failover
+- **MySQL**: Set up MySQL Group Replication or master-slave replication
+
+### Backups
+
+- Schedule regular backups of your storage backend
+- Test restore procedures regularly
+- Consider point-in-time recovery capabilities
+- Store backups in a different geographic region
+
+### Monitoring
+
+Monitor these key metrics:
+
+- Connection pool utilization
+- Query latency (p50, p95, p99)
+- Storage capacity and growth rate
+- Error rates and failed queries
+- Cache hit rates (if caching enabled)
+
+### Security
+
+1. **Encryption at rest** - Enable database encryption
+2. **Encryption in transit** - Use SSL/TLS connections
+3. **Access control** - Use dedicated users with minimal privileges
+4. **Network isolation** - Keep storage in private network
+5. **Secrets management** - Use environment variables or secret managers for passwords
+
+### Performance Tuning
+
+#### For Redis:
+```yaml
+storage:
+  redis:
+    host: redis.example.com
+    port: 6379
+    poolConfig:
+      maxTotal: 100  # Increase for high concurrency
+      maxIdle: 50
+      minIdle: 10
+  compression: gzip  # Reduce memory usage
+  cache:
+    keyValue:
+      maximumSize: 50000  # Reduce database hits
+      expireAfterAccessSeconds: 3600
+```
+
+#### For PostgreSQL/MySQL:
+```yaml
+storage:
+  postgres:  # or mysql
+    host: db.example.com
+    port: 5432
+    username: infinitic
+    password: ${DB_PASSWORD}
+    maximumPoolSize: 50  # Tune based on workload
+    minimumIdle: 10
+    connectionTimeout: 30000
+  compression: gzip  # Reduce storage size
+```
+
+## Migration Between Backends
+
+When migrating between storage backends:
+
+1. **Plan for downtime** - Migration requires stopping active workflows
+2. **Export data** - Use backup/export tools for your current backend
+3. **Transform data** - Adapt data format if necessary
+4. **Import data** - Load into new backend
+5. **Validate** - Verify all data migrated correctly
+6. **Update configuration** - Point workers to new storage
+
+<Warning>
+  Storage backend migration requires careful planning. Test thoroughly in a staging environment first.
+</Warning>
+
+## Troubleshooting
+
+### Connection Issues
+
+**Symptom**: "Connection refused" or "Timeout" errors
+
+**Solutions**:
+- Verify host and port are correct
+- Check firewall rules allow connections
+- Ensure storage service is running
+- Verify network connectivity
+
+### Performance Issues
+
+**Symptom**: Slow workflow execution or high latency
+
+**Solutions**:
+- Increase connection pool size
+- Enable compression to reduce data transfer
+- Add caching to reduce database load
+- Scale your storage backend (add replicas/shards)
+- Check database query performance
+
+### Storage Growth
+
+**Symptom**: Database size growing rapidly
+
+**Solutions**:
+- Enable compression
+- Review data retention policies
+- Archive completed workflows
+- Monitor for workflow memory leaks
+
+## Next Steps
+
+- [Pulsar Transport](/infrastructure/pulsar) - Configure message transport
+- [Deployment](/infrastructure/deployment) - Deploy to production

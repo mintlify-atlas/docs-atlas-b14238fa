@@ -1,0 +1,199 @@
+---
+title: 'Retry Policies'
+description: 'Configure automatic retry behavior for failed tasks and workflows'
+icon: 'rotate-right'
+---
+
+Infinitic provides flexible retry mechanisms to handle transient failures automatically. You can configure retry policies using annotations or programmatic configuration.
+
+## The @Retry Annotation
+
+The `@Retry` annotation allows you to define custom retry policies for your tasks and workflows:
+
+```kotlin
+import io.infinitic.annotations.Retry
+
+@Retry(with = CustomRetryPolicy::class)
+class MyService : MyServiceInterface {
+    override fun process(data: String): Result {
+        // Task implementation
+    }
+}
+```
+
+### Method-Level Retry
+
+You can also apply retry policies to individual methods:
+
+```kotlin
+class MyService : MyServiceInterface {
+    
+    @Retry(with = AggressiveRetryPolicy::class)
+    override fun criticalOperation(): Result {
+        // This method has a custom retry policy
+    }
+    
+    override fun normalOperation(): Result {
+        // This uses the class-level or default retry policy
+    }
+}
+```
+
+## Implementing WithRetry
+
+Create custom retry policies by implementing the `WithRetry` interface:
+
+```kotlin
+import io.infinitic.tasks.WithRetry
+
+class CustomRetryPolicy : WithRetry {
+    override fun getSecondsBeforeRetry(retry: Int, e: Exception): Double? {
+        // Return delay in seconds before next retry
+        // Return null to stop retrying
+        
+        return when {
+            retry > 5 -> null // Stop after 5 retries
+            e is TransientException -> 2.0.pow(retry) // Exponential backoff
+            else -> null // Don't retry other exceptions
+        }
+    }
+}
+```
+
+### WithRetry Interface
+
+The `WithRetry` interface has a single method:
+
+```kotlin
+fun interface WithRetry {
+    fun getSecondsBeforeRetry(retry: Int, e: Exception): Double?
+}
+```
+
+**Parameters:**
+- `retry` - The retry attempt number (0-indexed)
+- `e` - The exception that caused the failure
+
+**Return value:**
+- `Double` - Delay in seconds before the next retry attempt
+- `null` - Stop retrying and fail the task
+
+## Common Retry Patterns
+
+### Exponential Backoff
+
+```kotlin
+class ExponentialBackoff : WithRetry {
+    override fun getSecondsBeforeRetry(retry: Int, e: Exception): Double? {
+        return if (retry < 10) {
+            2.0.pow(retry) // 1s, 2s, 4s, 8s, 16s, ...
+        } else {
+            null // Stop after 10 attempts
+        }
+    }
+}
+```
+
+### Fixed Delay
+
+```kotlin
+class FixedDelayRetry : WithRetry {
+    override fun getSecondsBeforeRetry(retry: Int, e: Exception): Double? {
+        return if (retry < 3) {
+            5.0 // Wait 5 seconds between attempts
+        } else {
+            null
+        }
+    }
+}
+```
+
+### Exception-Based Retry
+
+```kotlin
+class SmartRetry : WithRetry {
+    override fun getSecondsBeforeRetry(retry: Int, e: Exception): Double? {
+        return when (e) {
+            is NetworkException -> {
+                // Retry network errors with exponential backoff
+                if (retry < 5) 2.0.pow(retry) else null
+            }
+            is RateLimitException -> {
+                // Retry rate limits with longer delay
+                if (retry < 3) 60.0 else null
+            }
+            else -> null // Don't retry other exceptions
+        }
+    }
+}
+```
+
+### Immediate Retry with Limit
+
+```kotlin
+class ImmediateRetry : WithRetry {
+    override fun getSecondsBeforeRetry(retry: Int, e: Exception): Double? {
+        return if (retry < 3) 0.0 else null // Retry immediately, up to 3 times
+    }
+}
+```
+
+## Workflow Task Retry
+
+You can manually retry a workflow's task execution using the client:
+
+```kotlin
+val workflow = client.getWorkflowById(MyWorkflow::class.java, workflowId)
+workflow.retryAsync()
+```
+
+This is useful when you want to retry the workflow's internal task after fixing an issue.
+
+## Retry Events
+
+Infinitic emits CloudEvents for retry operations:
+
+- `retryScheduled` - A retry has been scheduled for a failed task
+- `retryTask` - Retrying a specific task
+- `retryExecutor` - Retrying workflow executor
+
+## WithRetryBuilder
+
+For more complex scenarios, you can use `WithRetryBuilder` to create retry policies dynamically:
+
+```kotlin
+fun interface WithRetryBuilder {
+    fun build(): WithRetry
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use exponential backoff for transient failures">
+    Exponential backoff prevents overwhelming systems during outages and gives them time to recover.
+  </Accordion>
+
+  <Accordion title="Set maximum retry limits">
+    Always set a maximum number of retries to prevent infinite retry loops.
+  </Accordion>
+
+  <Accordion title="Consider exception types">
+    Retry transient errors (network, timeout) but not permanent errors (validation, not found).
+  </Accordion>
+
+  <Accordion title="Add jitter to prevent thundering herd">
+    Add random variation to retry delays to prevent many tasks from retrying simultaneously.
+  </Accordion>
+
+  <Accordion title="Monitor retry metrics">
+    Track retry rates to identify problematic services or workflows.
+  </Accordion>
+</AccordionGroup>
+
+## Related Topics
+
+- [Error Handling](/advanced/error-handling) - Handle task and workflow failures
+- [Timeouts](/advanced/timeouts) - Configure timeout behavior
+- [CloudEvents](/advanced/cloud-events) - Monitor retry events
+- [Monitoring](/advanced/monitoring) - Track retry metrics

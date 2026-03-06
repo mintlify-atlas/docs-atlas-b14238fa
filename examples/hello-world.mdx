@@ -1,0 +1,201 @@
+---
+title: Hello World
+description: Your first Infinitic workflow - a simple example to get started
+---
+
+This example demonstrates the basics of creating a workflow and service with Infinitic. You'll learn how to define interfaces, implement services, build workflows, and execute them.
+
+## What You'll Build
+
+A simple workflow that concatenates strings using a service, demonstrating:
+- Service definition and implementation
+- Workflow orchestration
+- Task execution
+- Client usage
+
+<Steps>
+
+### Define the Service Interface
+
+Create an interface for your service tasks:
+
+```kotlin
+package com.example
+
+interface HelloWorldService {
+    fun concat(str1: String, str2: String): String
+    fun reverse(str: String): String
+}
+```
+
+### Implement the Service
+
+Implement the service with your business logic:
+
+```kotlin
+package com.example
+
+class HelloWorldServiceImpl : HelloWorldService {
+    override fun concat(str1: String, str2: String): String {
+        return str1 + str2
+    }
+    
+    override fun reverse(str: String): String {
+        return str.reversed()
+    }
+}
+```
+
+### Define the Workflow Interface
+
+Create an interface for your workflow:
+
+```kotlin
+package com.example
+
+interface HelloWorldWorkflow {
+    fun greet(name: String): String
+}
+```
+
+### Implement the Workflow
+
+Implement the workflow by orchestrating service calls:
+
+```kotlin
+package com.example
+
+import io.infinitic.workflows.Workflow
+
+class HelloWorldWorkflowImpl : Workflow(), HelloWorldWorkflow {
+    // Create a stub for the service
+    private val service = newService(HelloWorldService::class.java)
+    
+    override fun greet(name: String): String {
+        // Orchestrate multiple service calls
+        val hello = service.concat("Hello", " ")
+        val greeting = service.concat(hello, name)
+        val excited = service.concat(greeting, "!")
+        
+        return excited
+    }
+}
+```
+
+### Configure Infinitic
+
+Create an `infinitic.yml` configuration file:
+
+```yaml
+transport: inMemory
+
+services:
+  - name: HelloWorldService
+    class: com.example.HelloWorldServiceImpl
+
+workflows:
+  - name: HelloWorldWorkflow
+    class: com.example.HelloWorldWorkflowImpl
+```
+
+### Start Workers
+
+Create and start workers to process tasks:
+
+```kotlin
+package com.example
+
+import io.infinitic.worker.InfiniticWorker
+
+fun main() {
+    // Create worker from configuration
+    val worker = InfiniticWorker.fromConfigFile("infinitic.yml")
+    
+    // Start processing
+    worker.start()
+    
+    println("Worker started and ready to process tasks...")
+}
+```
+
+### Execute the Workflow
+
+Create a client to start the workflow:
+
+```kotlin
+package com.example
+
+import io.infinitic.client.InfiniticClient
+
+fun main() {
+    // Create client from configuration
+    val client = InfiniticClient.fromConfigFile("infinitic.yml")
+    
+    // Get a workflow stub
+    val workflow = client.newWorkflow(HelloWorldWorkflow::class.java)
+    
+    // Execute the workflow synchronously
+    val result = workflow.greet("World")
+    
+    println(result) // Prints: Hello World!
+    
+    // Clean up
+    client.close()
+}
+```
+
+### Run Asynchronously
+
+For long-running workflows, dispatch them asynchronously:
+
+```kotlin
+val client = InfiniticClient.fromConfigFile("infinitic.yml")
+val workflow = client.newWorkflow(HelloWorldWorkflow::class.java)
+
+// Dispatch asynchronously
+val deferred = client.dispatch(workflow::greet, "World")
+
+println("Workflow dispatched with ID: ${deferred.id}")
+
+// Wait for completion
+val result = deferred.await()
+println(result) // Prints: Hello World!
+
+client.close()
+```
+
+</Steps>
+
+## Expected Output
+
+When you run the workflow, you should see:
+
+```
+Hello World!
+```
+
+## Key Concepts
+
+<AccordionGroup>
+<Accordion title="Services">
+Services contain the actual business logic. Each method represents a task that can be executed independently, with automatic retry and timeout handling.
+</Accordion>
+
+<Accordion title="Workflows">
+Workflows orchestrate services by defining the order and logic of task execution. They maintain state and can run for long periods, surviving system restarts.
+</Accordion>
+
+<Accordion title="Stubs">
+Use `newService()` to create service stubs within workflows. These stubs automatically handle task dispatching and result retrieval.
+</Accordion>
+
+<Accordion title="Client">
+The client is used to start workflows, send signals, and retrieve results. It can dispatch workflows synchronously or asynchronously.
+</Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+- Learn about [error handling](/advanced/error-handling) in workflows
+- Explore [workflow methods](/workflows/workflow-methods) for state management
+- Try the [booking workflow example](/examples/booking-workflow) for a more complex scenario

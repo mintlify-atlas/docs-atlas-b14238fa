@@ -1,0 +1,234 @@
+---
+title: Workflow
+description: Base class for defining workflows in Infinitic
+---
+
+The `Workflow` abstract class is the base class for all workflow implementations in Infinitic. Workflows orchestrate the execution of tasks and other workflows in a durable, fault-tolerant manner.
+
+## Package
+
+```kotlin
+io.infinitic.workflows.Workflow
+```
+
+## Overview
+
+Workflows in Infinitic are defined by extending the `Workflow` abstract class. The workflow implementation contains the orchestration logic that coordinates tasks, handles results, and manages the overall business process.
+
+## Static Properties
+
+These properties provide context information about the currently executing workflow:
+
+<ParamField path="workflowName" type="String">
+  The name of the workflow
+</ParamField>
+
+<ParamField path="workflowId" type="String">
+  The unique identifier of the workflow instance
+</ParamField>
+
+<ParamField path="methodName" type="String">
+  The name of the currently executing workflow method
+</ParamField>
+
+<ParamField path="methodId" type="String">
+  The unique identifier of the workflow method execution
+</ParamField>
+
+<ParamField path="tags" type="Set<String>">
+  The set of tags associated with the workflow instance
+</ParamField>
+
+<ParamField path="meta" type="Map<String, ByteArray>">
+  Metadata associated with the workflow instance
+</ParamField>
+
+## Protected Methods
+
+### Task and Workflow Creation
+
+<ParamField path="newService" type="<T> T">
+  Creates a stub for dispatching tasks to a service
+  
+  **Parameters:**
+  - `klass: Class<out T>` - The service interface class
+  - `tags: Set<String>?` - Optional tags to apply to tasks (default: null)
+  - `meta: Map<String, ByteArray>?` - Optional metadata for tasks (default: null)
+  
+  **Returns:** A proxy stub for the service
+  
+  **Example:**
+  ```kotlin
+  val service = newService(MyService::class.java)
+  val deferred = dispatch(service::processData, data)
+  ```
+</ParamField>
+
+<ParamField path="newWorkflow" type="<T> T">
+  Creates a stub for dispatching a new child workflow
+  
+  **Parameters:**
+  - `klass: Class<out T>` - The workflow interface class
+  - `tags: Set<String>?` - Optional tags to apply to the workflow (default: null)
+  - `meta: Map<String, ByteArray>?` - Optional metadata for the workflow (default: null)
+  
+  **Returns:** A proxy stub for the workflow
+</ParamField>
+
+<ParamField path="getWorkflowById" type="<T> T">
+  Gets a stub for an existing workflow by its ID
+  
+  **Parameters:**
+  - `klass: Class<out T>` - The workflow interface class
+  - `id: String` - The workflow instance ID
+  
+  **Returns:** A proxy stub for the existing workflow
+</ParamField>
+
+<ParamField path="getWorkflowByTag" type="<T> T">
+  Gets a stub for an existing workflow by its tag
+  
+  **Parameters:**
+  - `klass: Class<out T>` - The workflow interface class
+  - `tag: String` - The workflow tag
+  
+  **Returns:** A proxy stub for the existing workflow
+</ParamField>
+
+### Dispatching Tasks and Workflows
+
+<ParamField path="dispatch" type="<R> Deferred<R>">
+  Dispatches a task or workflow method and returns a Deferred for the result
+  
+  **Overloads:**
+  - `dispatch(method: () -> R): Deferred<R>` - No parameters
+  - `dispatch(method: (P1) -> R, p1: P1): Deferred<R>` - 1 parameter
+  - `dispatch(method: (P1, P2) -> R, p1: P1, p2: P2): Deferred<R>` - 2 parameters
+  - Up to 9 parameters supported
+  
+  **Example:**
+  ```kotlin
+  val service = newService(MyService::class.java)
+  val deferred = dispatch(service::calculate, input)
+  val result = deferred.await()
+  ```
+</ParamField>
+
+<ParamField path="dispatchVoid" type="Deferred<Void>">
+  Dispatches a task or workflow method that returns void
+  
+  **Overloads:** Support 0 to 9 parameters using Consumer interfaces
+</ParamField>
+
+### Timers
+
+<ParamField path="timer" type="Deferred<Instant>">
+  Creates a timer that completes after a specified duration or at a specific instant
+  
+  **Overloads:**
+  - `timer(duration: Duration): Deferred<Instant>` - Timer based on duration
+  - `timer(instant: Instant): Deferred<Instant>` - Timer based on absolute time
+  
+  **Example:**
+  ```kotlin
+  // Wait for 5 minutes
+  timer(Duration.ofMinutes(5)).await()
+  
+  // Wait until specific time
+  timer(Instant.parse("2024-12-31T23:59:59Z")).await()
+  ```
+</ParamField>
+
+### Channels
+
+<ParamField path="channel" type="<T> Channel<T>">
+  Creates a channel for sending and receiving signals within the workflow
+  
+  **Returns:** A new Channel instance
+  
+  **Example:**
+  ```kotlin
+  val approvalChannel = channel<ApprovalSignal>()
+  val approval = approvalChannel.receive(ApprovalSignal::class.java).await()
+  ```
+</ParamField>
+
+### Inline Execution
+
+<ParamField path="inline" type="<S> S">
+  Executes a task inline (synchronously) without dispatching
+  
+  **Parameters:**
+  - `task: () -> S` - The task to execute
+  
+  **Returns:** The result of the task
+  
+  **Example:**
+  ```kotlin
+  val result = inline {
+    // This runs synchronously within the workflow
+    computeValue()
+  }
+  ```
+</ParamField>
+
+<ParamField path="inlineVoid" type="Unit">
+  Executes a void task inline (synchronously) without dispatching
+  
+  **Parameters:**
+  - `task: Consumer0` - The task to execute
+</ParamField>
+
+## Usage Example
+
+```kotlin
+import io.infinitic.workflows.Workflow
+import java.time.Duration
+
+interface BookingWorkflow {
+  fun processBooking(bookingId: String): BookingResult
+}
+
+class BookingWorkflowImpl : Workflow(), BookingWorkflow {
+  override fun processBooking(bookingId: String): BookingResult {
+    // Create service stubs
+    val paymentService = newService(PaymentService::class.java)
+    val inventoryService = newService(InventoryService::class.java)
+    val notificationService = newService(NotificationService::class.java)
+    
+    // Reserve inventory
+    val reservationDeferred = dispatch(inventoryService::reserve, bookingId)
+    val reservation = reservationDeferred.await()
+    
+    // Process payment with timeout
+    val paymentDeferred = dispatch(paymentService::charge, reservation.amount)
+    timer(Duration.ofMinutes(5)).await() // Wait up to 5 minutes
+    
+    if (paymentDeferred.isCompleted()) {
+      val payment = paymentDeferred.await()
+      
+      // Send confirmation
+      dispatch(notificationService::sendConfirmation, bookingId)
+      
+      return BookingResult.success(payment, reservation)
+    } else {
+      // Cancel reservation if payment times out
+      dispatch(inventoryService::cancelReservation, reservation.id)
+      return BookingResult.timeout()
+    }
+  }
+}
+```
+
+## Notes
+
+- All workflow methods must be deterministic
+- Use `@Ignore` annotation on properties that should not be persisted
+- Workflows are automatically retried on failure according to the retry policy
+- Channel names are automatically set based on the getter method name
+
+## See Also
+
+- [Deferred](/api/deferred) - For handling asynchronous results
+- [InfiniticClient](/api/infinitic-client) - For starting workflows
+- [Annotations](/api/annotations/name) - For configuring workflow behavior

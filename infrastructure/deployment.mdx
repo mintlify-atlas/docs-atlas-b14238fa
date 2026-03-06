@@ -1,0 +1,839 @@
+---
+title: Deployment
+description: Deploy Infinitic workers and services to production environments
+---
+
+This guide covers deploying Infinitic to production, including architecture patterns, configuration management, and operational best practices.
+
+## Architecture Overview
+
+An Infinitic deployment consists of:
+
+1. **Pulsar Cluster** - Message transport layer
+2. **Storage Backend** - Persistent state storage (Redis/PostgreSQL/MySQL)
+3. **Infinitic Workers** - Execute tasks and workflows
+4. **Client Applications** - Trigger workflows and tasks
+
+```
+┌─────────────────┐
+│ Client Apps     │
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐       ┌──────────────┐
+│ Pulsar Cluster  │◄─────►│ Workers      │
+└────────┬────────┘       └──────┬───────┘
+         │                       │
+         v                       v
+┌─────────────────┐       ┌──────────────┐
+│ Storage Backend │◄──────┤ State/Data   │
+└─────────────────┘       └──────────────┘
+```
+
+## Deployment Patterns
+
+### Single-Tenant Architecture
+
+All components in one namespace/environment:
+
+```yaml
+# Production configuration
+transport:
+  pulsar:
+    tenant: mycompany
+    namespace: production
+    # ...
+
+storage:
+  redis:
+    host: redis-prod.internal
+    database: 0
+```
+
+**Use when:**
+- Single application or team
+- Simplified operations
+- Lower infrastructure costs
+
+### Multi-Tenant Architecture
+
+Separate namespaces per tenant/environment:
+
+```yaml
+# Tenant A - Production
+transport:
+  pulsar:
+    tenant: tenant-a
+    namespace: production
+
+storage:
+  redis:
+    host: redis-prod.internal
+    database: 0  # Tenant A
+```
+
+```yaml
+# Tenant B - Production
+transport:
+  pulsar:
+    tenant: tenant-b
+    namespace: production
+
+storage:
+  redis:
+    host: redis-prod.internal
+    database: 1  # Tenant B
+```
+
+**Use when:**
+- Multiple independent applications
+- Different teams or business units
+- Isolation requirements
+- Different SLAs per tenant
+
+## Configuration Management
+
+### Environment Variables
+
+Use environment variables for secrets and environment-specific values:
+
+```yaml
+# config.yml
+transport:
+  pulsar:
+    brokerServiceUrl: ${PULSAR_BROKER_URL}
+    webServiceUrl: ${PULSAR_WEB_URL}
+    tenant: ${PULSAR_TENANT}
+    namespace: ${PULSAR_NAMESPACE}
+    client:
+      authentication:
+        token: ${PULSAR_AUTH_TOKEN}
+
+storage:
+  redis:
+    host: ${REDIS_HOST}
+    port: ${REDIS_PORT:-6379}
+    password: ${REDIS_PASSWORD}
+    ssl: ${REDIS_SSL:-false}
+```
+
+### Secrets Management
+
+Integrate with secrets managers:
+
+<CodeGroup>
+```bash AWS Secrets Manager
+# Export secrets as environment variables
+export REDIS_PASSWORD=$(aws secretsmanager get-secret-value \
+    --secret-id prod/infinitic/redis \
+    --query SecretString \
+    --output text | jq -r .password)
+
+export PULSAR_AUTH_TOKEN=$(aws secretsmanager get-secret-value \
+    --secret-id prod/infinitic/pulsar \
+    --query SecretString \
+    --output text | jq -r .token)
+```
+
+```bash HashiCorp Vault
+# Export secrets from Vault
+export REDIS_PASSWORD=$(vault kv get -field=password secret/infinitic/redis)
+export PULSAR_AUTH_TOKEN=$(vault kv get -field=token secret/infinitic/pulsar)
+```
+
+```bash Kubernetes Secrets
+# kubernetes-deployment.yml
+env:
+  - name: REDIS_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: infinitic-secrets
+        key: redis-password
+  - name: PULSAR_AUTH_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: infinitic-secrets
+        key: pulsar-token
+```
+</CodeGroup>
+
+### Multi-Environment Configuration
+
+Organize configurations by environment:
+
+```
+config/
+├── base.yml           # Common configuration
+├── dev.yml            # Development overrides
+├── staging.yml        # Staging overrides
+└── production.yml     # Production overrides
+```
+
+```yaml
+# base.yml
+transport:
+  pulsar:
+    tenant: mycompany
+    consumer:
+      maxRedeliverCount: 3
+
+storage:
+  compression: gzip
+```
+
+```yaml
+# production.yml
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar+ssl://pulsar-prod.example.com:6651/
+    webServiceUrl: https://pulsar-prod.example.com:8443
+    namespace: production
+    client:
+      ioThreads: 16
+      memoryLimitMB: 1024
+
+storage:
+  redis:
+    host: redis-prod.example.com
+    port: 6379
+    ssl: true
+    poolConfig:
+      maxTotal: 50
+```
+
+Load configuration:
+
+<CodeGroup>
+```kotlin Kotlin
+val config = WorkerConfig.fromYamlFile(
+    "config/base.yml",
+    "config/production.yml"
+)
+```
+
+```java Java
+WorkerConfig config = WorkerConfig.fromYamlFile(
+    "config/base.yml",
+    "config/production.yml"
+);
+```
+</CodeGroup>
+
+## Docker Deployment
+
+### Dockerfile
+
+```dockerfile
+FROM eclipse-temurin:17-jre-alpine
+
+# Create app directory
+WORKDIR /app
+
+# Copy application JAR
+COPY target/infinitic-worker.jar /app/worker.jar
+
+# Copy configuration
+COPY config/ /app/config/
+
+# Set environment
+ENV JAVA_OPTS="-Xms512m -Xmx2048m"
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s \
+  CMD curl -f http://localhost:8080/health || exit 1
+
+# Run worker
+CMD java $JAVA_OPTS -jar worker.jar --config=/app/config/base.yml,/app/config/production.yml
+```
+
+### Docker Compose
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  pulsar:
+    image: apachepulsar/pulsar:3.1.0
+    ports:
+      - "6650:6650"
+      - "8080:8080"
+    command: bin/pulsar standalone
+    volumes:
+      - pulsar-data:/pulsar/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+
+  worker:
+    build: .
+    depends_on:
+      - pulsar
+      - redis
+    environment:
+      - PULSAR_BROKER_URL=pulsar://pulsar:6650/
+      - PULSAR_WEB_URL=http://pulsar:8080
+      - PULSAR_TENANT=infinitic
+      - PULSAR_NAMESPACE=dev
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+volumes:
+  pulsar-data:
+  redis-data:
+```
+
+## Kubernetes Deployment
+
+### Worker Deployment
+
+```yaml
+# worker-deployment.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infinitic-worker
+  namespace: infinitic
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: infinitic-worker
+  template:
+    metadata:
+      labels:
+        app: infinitic-worker
+    spec:
+      containers:
+      - name: worker
+        image: mycompany/infinitic-worker:1.0.0
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "1000m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+        env:
+        - name: PULSAR_BROKER_URL
+          value: "pulsar://pulsar-proxy.pulsar:6650/"
+        - name: PULSAR_WEB_URL
+          value: "http://pulsar-proxy.pulsar:8080"
+        - name: PULSAR_TENANT
+          value: "infinitic"
+        - name: PULSAR_NAMESPACE
+          value: "production"
+        - name: REDIS_HOST
+          value: "redis-master.redis"
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infinitic-secrets
+              key: redis-password
+        - name: PULSAR_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: infinitic-secrets
+              key: pulsar-token
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: infinitic-worker
+  namespace: infinitic
+spec:
+  selector:
+    app: infinitic-worker
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 8080
+```
+
+### Horizontal Pod Autoscaling
+
+```yaml
+# worker-hpa.yml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: infinitic-worker-hpa
+  namespace: infinitic
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: infinitic-worker
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 2
+        periodSeconds: 30
+      selectPolicy: Max
+```
+
+### ConfigMap
+
+```yaml
+# worker-configmap.yml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: infinitic-config
+  namespace: infinitic
+data:
+  base.yml: |
+    transport:
+      pulsar:
+        tenant: ${PULSAR_TENANT}
+        namespace: ${PULSAR_NAMESPACE}
+        brokerServiceUrl: ${PULSAR_BROKER_URL}
+        webServiceUrl: ${PULSAR_WEB_URL}
+        consumer:
+          maxRedeliverCount: 3
+          negativeAckRedeliveryDelaySeconds: 30
+    storage:
+      redis:
+        host: ${REDIS_HOST}
+        port: ${REDIS_PORT}
+        password: ${REDIS_PASSWORD}
+        ssl: true
+        poolConfig:
+          maxTotal: 50
+          maxIdle: 20
+      compression: gzip
+      cache:
+        keyValue:
+          maximumSize: 10000
+          expireAfterAccessSeconds: 3600
+```
+
+## Scaling Strategies
+
+### Vertical Scaling
+
+Increase resources per worker:
+
+```yaml
+resources:
+  requests:
+    memory: "2Gi"   # Increased from 1Gi
+    cpu: "2000m"    # Increased from 1000m
+  limits:
+    memory: "4Gi"   # Increased from 2Gi
+    cpu: "4000m"    # Increased from 2000m
+```
+
+**When to use:**
+- CPU-intensive tasks
+- Memory-intensive workflows
+- Simple scaling approach
+
+### Horizontal Scaling
+
+Increase number of worker instances:
+
+```yaml
+spec:
+  replicas: 10  # Increased from 5
+```
+
+**When to use:**
+- High task throughput
+- Better fault tolerance
+- Easier rollouts/rollbacks
+
+### Task-Specific Workers
+
+Deploy specialized workers for different task types:
+
+```yaml
+# cpu-intensive-worker-deployment.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infinitic-worker-cpu
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+      - name: worker
+        image: mycompany/infinitic-worker:1.0.0
+        args: ["--tasks=cpu-intensive-tasks"]
+        resources:
+          requests:
+            cpu: "4000m"
+          limits:
+            cpu: "8000m"
+---
+# io-intensive-worker-deployment.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infinitic-worker-io
+spec:
+  replicas: 10
+  template:
+    spec:
+      containers:
+      - name: worker
+        image: mycompany/infinitic-worker:1.0.0
+        args: ["--tasks=io-intensive-tasks"]
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+```
+
+## Monitoring and Observability
+
+### Metrics
+
+Expose and collect these key metrics:
+
+**Worker Metrics:**
+- Active task executions
+- Task execution duration (p50, p95, p99)
+- Task success/failure rate
+- Queue depth/backlog
+- Worker CPU/memory usage
+
+**Infrastructure Metrics:**
+- Pulsar message rate
+- Pulsar consumer lag
+- Storage latency
+- Storage connection pool usage
+
+### Logging
+
+Structured logging configuration:
+
+```yaml
+# logback.xml
+<configuration>
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+      <includeMdcKeyName>workflowId</includeMdcKeyName>
+      <includeMdcKeyName>taskId</includeMdcKeyName>
+      <includeMdcKeyName>workflowName</includeMdcKeyName>
+      <includeMdcKeyName>taskName</includeMdcKeyName>
+    </encoder>
+  </appender>
+  
+  <logger name="io.infinitic" level="INFO"/>
+  <root level="INFO">
+    <appender-ref ref="STDOUT"/>
+  </root>
+</configuration>
+```
+
+### Health Checks
+
+Implement health check endpoints:
+
+<CodeGroup>
+```kotlin Kotlin
+import io.ktor.server.application.*
+import io.ktor.server.response.*
+import io.ktor.server.routing.*
+
+fun Application.healthChecks(worker: InfiniticWorker) {
+    routing {
+        get("/health") {
+            // Liveness probe - is the process running?
+            call.respondText("OK")
+        }
+        
+        get("/ready") {
+            // Readiness probe - can it serve traffic?
+            val isConnected = worker.isConnected()
+            if (isConnected) {
+                call.respondText("Ready")
+            } else {
+                call.response.status(503)
+                call.respondText("Not ready")
+            }
+        }
+    }
+}
+```
+
+```java Java
+import org.springframework.web.bind.annotation.*;
+import org.springframework.http.*;
+
+@RestController
+public class HealthController {
+    
+    private final InfiniticWorker worker;
+    
+    @GetMapping("/health")
+    public ResponseEntity<String> health() {
+        // Liveness probe
+        return ResponseEntity.ok("OK");
+    }
+    
+    @GetMapping("/ready")
+    public ResponseEntity<String> ready() {
+        // Readiness probe
+        boolean isConnected = worker.isConnected();
+        if (isConnected) {
+            return ResponseEntity.ok("Ready");
+        } else {
+            return ResponseEntity.status(503).body("Not ready");
+        }
+    }
+}
+```
+</CodeGroup>
+
+## High Availability
+
+### Worker Redundancy
+
+Deploy multiple workers across availability zones:
+
+```yaml
+spec:
+  replicas: 9
+  template:
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - infinitic-worker
+              topologyKey: topology.kubernetes.io/zone
+```
+
+### Infrastructure HA
+
+**Pulsar:**
+- Deploy multi-node Pulsar cluster
+- Configure BookKeeper with replication
+- Use ZooKeeper for coordination
+
+**Redis:**
+- Use Redis Sentinel or Redis Cluster
+- Configure automatic failover
+- Set up replication across AZs
+
+**PostgreSQL/MySQL:**
+- Configure streaming replication
+- Set up automatic failover (e.g., Patroni for PostgreSQL)
+- Use connection pooling (PgBouncer, ProxySQL)
+
+## Disaster Recovery
+
+### Backup Strategy
+
+**Pulsar:**
+```bash
+# Backup Pulsar metadata
+pulsar-admin namespaces get-backlog-quotas infinitic/production
+pulsar-admin namespaces get-retention infinitic/production
+```
+
+**Redis:**
+```bash
+# Enable AOF and RDB backups
+redis-cli BGSAVE
+redis-cli BGREWRITEAOF
+
+# Automated backup script
+#!/bin/bash
+DATE=$(date +%Y%m%d-%H%M%S)
+redis-cli --rdb /backup/dump-$DATE.rdb
+```
+
+**PostgreSQL:**
+```bash
+# Full backup
+pg_dump -h postgres.example.com infinitic > infinitic-backup-$(date +%Y%m%d).sql
+
+# Point-in-time recovery setup
+archive_mode = on
+archive_command = 'cp %p /archive/%f'
+```
+
+### Recovery Procedures
+
+1. **Restore infrastructure** - Bring up Pulsar and storage
+2. **Restore state** - Load backup data into storage
+3. **Deploy workers** - Start worker deployments
+4. **Verify health** - Check all health endpoints
+5. **Resume operations** - Enable traffic to client applications
+
+## Security Best Practices
+
+### Network Security
+
+- Deploy in private subnets
+- Use security groups/network policies
+- Enable TLS for all connections
+- Implement network segmentation
+
+### Access Control
+
+```yaml
+# kubernetes-rbac.yml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: infinitic-worker
+  namespace: infinitic
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: infinitic-worker-role
+  namespace: infinitic
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: infinitic-worker-binding
+  namespace: infinitic
+subjects:
+- kind: ServiceAccount
+  name: infinitic-worker
+  namespace: infinitic
+roleRef:
+  kind: Role
+  name: infinitic-worker-role
+  apiGroup: rbac.authorization.k8s.io
+```
+
+### Secrets Management
+
+- Never commit secrets to version control
+- Rotate secrets regularly
+- Use secrets managers (Vault, AWS Secrets Manager)
+- Limit secret access to necessary services only
+
+## Troubleshooting
+
+### Worker Not Starting
+
+**Check logs:**
+```bash
+kubectl logs -n infinitic deployment/infinitic-worker
+```
+
+**Common issues:**
+- Invalid configuration syntax
+- Unable to connect to Pulsar/storage
+- Missing authentication credentials
+- Insufficient resources
+
+### High Latency
+
+**Investigate:**
+- Storage backend performance
+- Network latency between components
+- Worker resource constraints
+- Pulsar message backlog
+
+**Solutions:**
+- Scale workers horizontally
+- Optimize task implementations
+- Increase connection pools
+- Enable caching
+
+### Message Backlog
+
+**Check backlog:**
+```bash
+pulsar-admin topics stats persistent://infinitic/production/task-queue
+```
+
+**Solutions:**
+- Increase worker count
+- Optimize slow tasks
+- Check for stuck workflows
+- Review error rates
+
+## Production Checklist
+
+- [ ] TLS enabled for all connections
+- [ ] Authentication configured
+- [ ] Secrets stored securely
+- [ ] High availability configured
+- [ ] Backups automated and tested
+- [ ] Monitoring and alerting set up
+- [ ] Health checks implemented
+- [ ] Resource limits defined
+- [ ] Autoscaling configured
+- [ ] Disaster recovery plan documented
+- [ ] Network policies implemented
+- [ ] Logging centralized
+- [ ] Performance tested under load
+- [ ] Rollback procedure tested
+
+## Next Steps
+
+- [Pulsar Transport](/infrastructure/pulsar) - Deep dive into Pulsar configuration
+- [Storage Backends](/infrastructure/storage-backends) - Configure storage options

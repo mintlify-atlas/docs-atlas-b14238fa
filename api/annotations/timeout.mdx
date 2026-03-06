@@ -1,0 +1,352 @@
+---
+title: "@Timeout"
+description: Configure timeout behavior for tasks and workflows
+---
+
+The `@Timeout` annotation allows you to specify a custom timeout policy for services, workflows, or individual methods using a `WithTimeout` class.
+
+## Package
+
+```kotlin
+io.infinitic.annotations.Timeout
+```
+
+## Targets
+
+- Classes (services and workflows)
+- Methods (service methods and workflow methods)
+
+## Parameters
+
+<ParamField path="with" type="KClass<out WithTimeout>" required>
+  The class implementing the timeout policy (must implement `WithTimeout` interface)
+</ParamField>
+
+## WithTimeout Interface
+
+To define a timeout policy, implement the `WithTimeout` interface:
+
+```kotlin
+import io.infinitic.tasks.WithTimeout
+
+class MyTimeoutPolicy : WithTimeout {
+  override fun getTimeoutSeconds(): Double {
+    // Return number of seconds before timeout
+    return 30.0 // 30 seconds
+  }
+}
+```
+
+## Usage
+
+### On Classes
+
+Apply a timeout policy to all methods in a service or workflow:
+
+```kotlin
+import io.infinitic.annotations.Timeout
+
+@Timeout(with = StandardTimeout::class)
+interface PaymentService {
+  fun processPayment(amount: Double): PaymentResult
+  fun refundPayment(transactionId: String): RefundResult
+}
+
+@Timeout(with = LongRunningTimeout::class)
+interface DataProcessingWorkflow {
+  fun processLargeDataset(datasetId: String): ProcessingResult
+}
+```
+
+### On Methods
+
+Apply different timeout policies to specific methods:
+
+```kotlin
+import io.infinitic.annotations.Timeout
+
+interface PaymentService {
+  @Timeout(with = QuickTimeout::class)
+  fun validateCard(cardInfo: CardInfo): ValidationResult
+  
+  @Timeout(with = StandardTimeout::class)
+  fun processPayment(amount: Double): PaymentResult
+  
+  @Timeout(with = LongTimeout::class)
+  fun processLargeTransaction(transactionData: TransactionData): PaymentResult
+}
+```
+
+## Timeout Policy Examples
+
+### Fixed Timeouts
+
+```kotlin
+import io.infinitic.tasks.WithTimeout
+
+class QuickTimeout : WithTimeout {
+  override fun getTimeoutSeconds() = 5.0 // 5 seconds
+}
+
+class StandardTimeout : WithTimeout {
+  override fun getTimeoutSeconds() = 30.0 // 30 seconds
+}
+
+class LongTimeout : WithTimeout {
+  override fun getTimeoutSeconds() = 300.0 // 5 minutes
+}
+
+class VeryLongTimeout : WithTimeout {
+  override fun getTimeoutSeconds() = 3600.0 // 1 hour
+}
+```
+
+### Dynamic Timeout Based on Context
+
+```kotlin
+import io.infinitic.tasks.Task
+import io.infinitic.tasks.WithTimeout
+
+class DynamicTimeout : WithTimeout {
+  override fun getTimeoutSeconds(): Double {
+    // Access task metadata to determine timeout
+    val priority = Task.meta["priority"]?.toString() ?: "normal"
+    
+    return when (priority) {
+      "high" -> 60.0   // 1 minute for high priority
+      "low" -> 300.0   // 5 minutes for low priority
+      else -> 120.0    // 2 minutes for normal priority
+    }
+  }
+}
+```
+
+### Retry-Aware Timeout
+
+```kotlin
+import io.infinitic.tasks.Task
+import io.infinitic.tasks.WithTimeout
+
+class RetryAwareTimeout : WithTimeout {
+  override fun getTimeoutSeconds(): Double {
+    // Increase timeout with each retry
+    val retryCount = Task.retry
+    val baseTimeout = 30.0
+    
+    return baseTimeout * (retryCount + 1)
+  }
+}
+```
+
+### Environment-Based Timeout
+
+```kotlin
+import io.infinitic.tasks.WithTimeout
+
+class EnvironmentTimeout : WithTimeout {
+  override fun getTimeoutSeconds(): Double {
+    val environment = System.getenv("ENVIRONMENT") ?: "production"
+    
+    return when (environment) {
+      "development" -> 300.0  // 5 minutes in dev
+      "staging" -> 120.0      // 2 minutes in staging
+      "production" -> 60.0    // 1 minute in production
+      else -> 60.0
+    }
+  }
+}
+```
+
+## Method vs Class Priority
+
+When both class and method have `@Timeout` annotations, the method annotation takes precedence:
+
+```kotlin
+@Timeout(with = StandardTimeout::class)
+interface PaymentService {
+  // Uses StandardTimeout (30 seconds)
+  fun processPayment(amount: Double): PaymentResult
+  
+  // Uses QuickTimeout (5 seconds) - overrides class-level
+  @Timeout(with = QuickTimeout::class)
+  fun validateCard(cardInfo: CardInfo): ValidationResult
+}
+```
+
+## Integration with Configuration
+
+Timeout policies can also be configured in YAML (takes precedence over annotations):
+
+```yaml
+services:
+  - name: PaymentService
+    class: com.example.PaymentServiceImpl
+    executor:
+      concurrency: 10
+      withTimeout: com.example.StandardTimeout
+```
+
+## Timeout Behavior
+
+When a timeout occurs:
+
+1. The task execution is interrupted
+2. A `TimeoutException` is thrown
+3. The task can be retried based on the retry policy
+4. If no retry policy is defined, the task fails permanently
+
+```kotlin
+import io.infinitic.workflows.Workflow
+
+class BookingWorkflowImpl : Workflow(), BookingWorkflow {
+  override fun processBooking(bookingId: String): BookingResult {
+    val paymentService = newService(PaymentService::class.java)
+    
+    try {
+      val result = dispatch(paymentService::processPayment, 100.0).await()
+      return BookingResult.success(result)
+    } catch (e: Exception) {
+      // Handle timeout or other errors
+      when {
+        e.message?.contains("timeout") == true -> {
+          return BookingResult.timeout()
+        }
+        else -> throw e
+      }
+    }
+  }
+}
+```
+
+## Combining with Retry
+
+```kotlin
+import io.infinitic.annotations.Retry
+import io.infinitic.annotations.Timeout
+
+@Timeout(with = LongTimeout::class)
+@Retry(with = StandardRetryPolicy::class)
+interface ExternalApiService {
+  fun callExternalApi(request: ApiRequest): ApiResponse
+}
+```
+
+In this example:
+- Each attempt has a 5-minute timeout (LongTimeout)
+- If timeout occurs, the retry policy determines if/when to retry
+- Total possible duration = timeout × max retries
+
+## Best Practices
+
+1. **Set realistic timeouts**: Based on actual service performance, not arbitrary values
+2. **Account for network latency**: Add buffer for network delays
+3. **Use shorter timeouts for validation**: Quick operations should fail fast
+4. **Consider downstream timeouts**: Ensure timeouts align with dependent services
+5. **Monitor timeout occurrences**: Track timeouts to identify performance issues
+6. **Test timeout behavior**: Verify system handles timeouts gracefully
+7. **Document timeout values**: Make timeout expectations clear to consumers
+
+## Complete Example
+
+```kotlin
+import io.infinitic.annotations.Retry
+import io.infinitic.annotations.Timeout
+import io.infinitic.tasks.WithTimeout
+import io.infinitic.tasks.WithRetry
+import io.infinitic.exceptions.tasks.TaskFailedException
+
+// Define timeout policies
+class QuickTimeout : WithTimeout {
+  override fun getTimeoutSeconds() = 5.0
+}
+
+class StandardTimeout : WithTimeout {
+  override fun getTimeoutSeconds() = 30.0
+}
+
+class LongTimeout : WithTimeout {
+  override fun getTimeoutSeconds() = 300.0
+}
+
+// Define retry policy that handles timeouts
+class TimeoutRetryPolicy : WithRetry {
+  override fun getSecondsBeforeRetry(
+    retry: Int,
+    exception: TaskFailedException
+  ): Double? {
+    return when {
+      retry >= 3 -> null
+      exception.message?.contains("timeout") == true -> {
+        // Longer delay after timeout
+        (retry + 1) * 10.0
+      }
+      else -> (retry + 1) * 5.0
+    }
+  }
+}
+
+// Apply to service
+@Timeout(with = StandardTimeout::class)
+@Retry(with = TimeoutRetryPolicy::class)
+interface PaymentService {
+  // Quick validation with short timeout
+  @Timeout(with = QuickTimeout::class)
+  fun validatePaymentInfo(info: PaymentInfo): ValidationResult
+  
+  // Standard payment processing
+  fun processPayment(amount: Double): PaymentResult
+  
+  // Batch processing with long timeout
+  @Timeout(with = LongTimeout::class)
+  fun processBatchPayments(payments: List<Payment>): BatchResult
+}
+
+// Implementation
+class PaymentServiceImpl : PaymentService {
+  override fun validatePaymentInfo(info: PaymentInfo): ValidationResult {
+    // Has 5 seconds to complete (QuickTimeout)
+    return performQuickValidation(info)
+  }
+  
+  override fun processPayment(amount: Double): PaymentResult {
+    // Has 30 seconds to complete (StandardTimeout)
+    return callPaymentGateway(amount)
+  }
+  
+  override fun processBatchPayments(payments: List<Payment>): BatchResult {
+    // Has 5 minutes to complete (LongTimeout)
+    return processBatch(payments)
+  }
+}
+```
+
+## Monitoring Timeouts
+
+You can track timeout information within your service:
+
+```kotlin
+import io.infinitic.tasks.Task
+
+class PaymentServiceImpl : PaymentService {
+  override fun processPayment(amount: Double): PaymentResult {
+    val startTime = System.currentTimeMillis()
+    
+    try {
+      val result = callPaymentGateway(amount)
+      val duration = System.currentTimeMillis() - startTime
+      logger.info("Payment processed in ${duration}ms")
+      return result
+    } catch (e: Exception) {
+      val duration = System.currentTimeMillis() - startTime
+      logger.error("Payment failed after ${duration}ms: ${e.message}")
+      throw e
+    }
+  }
+}
+```
+
+## See Also
+
+- [Retry Annotation](/api/annotations/retry) - For retry configuration
+- [Name Annotation](/api/annotations/name) - For custom naming
+- [Worker Configuration](/api/config/worker-config) - For timeout configuration

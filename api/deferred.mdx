@@ -1,0 +1,292 @@
+---
+title: Deferred
+description: Handle for asynchronous workflow and task results
+---
+
+The `Deferred<T>` class represents a handle to an asynchronous operation in Infinitic. It's similar to a Promise or Future but integrated with Infinitic's durable execution model.
+
+## Package
+
+```kotlin
+io.infinitic.workflows.Deferred
+```
+
+## Overview
+
+A `Deferred` is returned when you dispatch a task or workflow. It allows you to:
+
+- Wait for the operation to complete and get the result
+- Check the status of the operation
+- Combine multiple operations using logical operators
+
+## Properties
+
+<ParamField path="id" type="String?">
+  The unique identifier of the deferred operation (null if not an ID-based step)
+  
+  **Example:**
+  ```kotlin
+  val deferred = dispatch(service::process, data)
+  println("Task ID: ${deferred.id}")
+  ```
+</ParamField>
+
+## Methods
+
+### Result Retrieval
+
+<ParamField path="await" type="T">
+  Waits for the operation to complete and returns the result
+  
+  This method blocks workflow execution until the deferred operation completes or is canceled. If the operation fails, the failure is propagated.
+  
+  **Returns:** The result of type T
+  
+  **Throws:** Exception if the operation failed
+  
+  **Example:**
+  ```kotlin
+  val service = newService(PaymentService::class.java)
+  val deferred = dispatch(service::processPayment, amount)
+  val result = deferred.await() // Blocks until payment is processed
+  ```
+</ParamField>
+
+### Status Checking
+
+<ParamField path="status" type="DeferredStatus">
+  Gets the current status of the operation without waiting
+  
+  **Returns:** One of:
+  - `DeferredStatus.ONGOING` - Still running
+  - `DeferredStatus.COMPLETED` - Successfully completed
+  - `DeferredStatus.FAILED` - Failed with error
+  - `DeferredStatus.CANCELED` - Was canceled
+  - `DeferredStatus.UNKNOWN` - Unknown (e.g., invalid ID)
+  
+  **Example:**
+  ```kotlin
+  val deferred = dispatch(service::longRunningTask)
+  
+  when (deferred.status()) {
+    DeferredStatus.ONGOING -> println("Still running")
+    DeferredStatus.COMPLETED -> println("Done!")
+    DeferredStatus.FAILED -> println("Failed")
+    DeferredStatus.CANCELED -> println("Canceled")
+    DeferredStatus.UNKNOWN -> println("Unknown")
+  }
+  ```
+</ParamField>
+
+<ParamField path="isOngoing" type="Boolean">
+  Returns true if the operation is still running
+</ParamField>
+
+<ParamField path="isCompleted" type="Boolean">
+  Returns true if the operation completed successfully
+</ParamField>
+
+<ParamField path="isFailed" type="Boolean">
+  Returns true if the operation failed
+</ParamField>
+
+<ParamField path="isCanceled" type="Boolean">
+  Returns true if the operation was canceled
+</ParamField>
+
+<ParamField path="isUnknown" type="Boolean">
+  Returns true if the operation status is unknown
+</ParamField>
+
+### Combining Operations
+
+<ParamField path="or" type="Deferred<T>">
+  Combines this Deferred with another using logical OR
+  
+  The resulting Deferred completes when either operation completes (whichever finishes first).
+  
+  **Parameters:**
+  - `other: Deferred<out T>` - Another deferred of the same type
+  
+  **Returns:** A new Deferred that represents the OR operation
+  
+  **Example:**
+  ```kotlin
+  val payment1 = dispatch(paymentService::processVisa, data)
+  val payment2 = dispatch(paymentService::processMastercard, data)
+  
+  // Wait for whichever completes first
+  val result = (payment1 or payment2).await()
+  ```
+</ParamField>
+
+<ParamField path="and" type="Deferred<List<T>>">
+  Combines this Deferred with another using logical AND
+  
+  The resulting Deferred completes when both operations complete.
+  
+  **Parameters:**
+  - `other: Deferred<out T>` - Another deferred of the same type
+  
+  **Returns:** A new `Deferred<List<T>>` containing results from both
+  
+  **Example:**
+  ```kotlin
+  val inventory = dispatch(inventoryService::reserve, item)
+  val shipping = dispatch(shippingService::calculate, address)
+  
+  // Wait for both to complete
+  val results = (inventory and shipping).await()
+  val inventoryResult = results[0]
+  val shippingResult = results[1]
+  ```
+</ParamField>
+
+## Static Functions
+
+<ParamField path="or" type="Deferred<T>">
+  Combines multiple Deferreds using logical OR
+  
+  **Parameters:**
+  - `vararg others: Deferred<out T>` - Multiple deferred operations
+  
+  **Returns:** A Deferred that completes when any operation completes
+  
+  **Example:**
+  ```kotlin
+  import io.infinitic.workflows.or
+  
+  val result = or(
+    dispatch(service1::process),
+    dispatch(service2::process),
+    dispatch(service3::process)
+  ).await() // Returns result from first to complete
+  ```
+</ParamField>
+
+<ParamField path="and" type="Deferred<List<T>>">
+  Combines multiple Deferreds using logical AND
+  
+  **Parameters:**
+  - `vararg others: Deferred<out T>` - Multiple deferred operations
+  
+  **Returns:** A `Deferred<List<T>>` that completes when all operations complete
+  
+  **Example:**
+  ```kotlin
+  import io.infinitic.workflows.and
+  
+  val results = and(
+    dispatch(service::task1),
+    dispatch(service::task2),
+    dispatch(service::task3)
+  ).await() // Returns list of all results
+  ```
+</ParamField>
+
+## Extension Functions
+
+<ParamField path="List<Deferred<T>>.and" type="Deferred<List<T>>">
+  Applies AND to a list of Deferreds
+  
+  **Example:**
+  ```kotlin
+  val tasks = listOf(
+    dispatch(service::task1),
+    dispatch(service::task2),
+    dispatch(service::task3)
+  )
+  
+  val results = tasks.and().await()
+  ```
+</ParamField>
+
+<ParamField path="List<Deferred<T>>.or" type="Deferred<T>">
+  Applies OR to a list of Deferreds
+  
+  **Example:**
+  ```kotlin
+  val tasks = listOf(
+    dispatch(service::task1),
+    dispatch(service::task2),
+    dispatch(service::task3)
+  )
+  
+  val result = tasks.or().await() // First to complete
+  ```
+</ParamField>
+
+## Usage Patterns
+
+### Sequential Execution
+
+```kotlin
+val result1 = dispatch(service::step1).await()
+val result2 = dispatch(service::step2, result1).await()
+val result3 = dispatch(service::step3, result2).await()
+```
+
+### Parallel Execution with AND
+
+```kotlin
+val deferred1 = dispatch(service::task1)
+val deferred2 = dispatch(service::task2)
+val deferred3 = dispatch(service::task3)
+
+// Wait for all to complete
+val results = (deferred1 and deferred2 and deferred3).await()
+```
+
+### Race Condition with OR
+
+```kotlin
+val fastPath = dispatch(cacheService::get, key)
+val slowPath = dispatch(databaseService::get, key)
+
+// Use whichever responds first
+val value = (fastPath or slowPath).await()
+```
+
+### Conditional Execution
+
+```kotlin
+val deferred = dispatch(service::longRunning)
+
+// Wait for 5 minutes
+timer(Duration.ofMinutes(5)).await()
+
+if (deferred.isCompleted()) {
+  val result = deferred.await()
+  // Process result
+} else {
+  // Handle timeout
+  println("Operation timed out")
+}
+```
+
+### Error Handling
+
+```kotlin
+try {
+  val result = dispatch(service::riskyOperation).await()
+  // Success path
+} catch (e: Exception) {
+  // Error handling
+  println("Operation failed: ${e.message}")
+  // Dispatch fallback
+  dispatch(service::fallback).await()
+}
+```
+
+## Important Notes
+
+- Deferreds should NOT be stored in workflow properties or method arguments
+- They are only valid within the workflow method where they are created
+- Calling `await()` in a workflow is deterministic and resumable
+- Status checks do not block workflow execution
+- Combining operations with `and`/`or` is also deterministic
+
+## See Also
+
+- [Workflow](/api/workflow) - For creating and managing Deferreds
+- [InfiniticClient](/api/infinitic-client) - For starting workflows that return Deferreds

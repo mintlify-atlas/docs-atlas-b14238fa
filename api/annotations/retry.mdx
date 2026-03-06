@@ -1,0 +1,310 @@
+---
+title: "@Retry"
+description: Configure retry behavior for tasks and workflows
+---
+
+The `@Retry` annotation allows you to specify a custom retry policy for services, workflows, or individual methods using a `WithRetry` class.
+
+## Package
+
+```kotlin
+io.infinitic.annotations.Retry
+```
+
+## Targets
+
+- Classes (services and workflows)
+- Methods (service methods and workflow methods)
+
+## Parameters
+
+<ParamField path="with" type="KClass<out WithRetry>" required>
+  The class implementing the retry policy (must implement `WithRetry` interface)
+</ParamField>
+
+## WithRetry Interface
+
+To define a retry policy, implement the `WithRetry` interface:
+
+```kotlin
+import io.infinitic.tasks.WithRetry
+import io.infinitic.exceptions.tasks.TaskFailedException
+
+class MyRetryPolicy : WithRetry {
+  override fun getSecondsBeforeRetry(
+    retry: Int,
+    exception: TaskFailedException
+  ): Double? {
+    // Return number of seconds to wait, or null to stop retrying
+    return when {
+      retry >= 5 -> null // Stop after 5 retries
+      else -> (retry * 2.0) // Exponential backoff: 0, 2, 4, 6, 8 seconds
+    }
+  }
+}
+```
+
+## Usage
+
+### On Classes
+
+Apply a retry policy to all methods in a service or workflow:
+
+```kotlin
+import io.infinitic.annotations.Retry
+
+@Retry(with = ExponentialRetryPolicy::class)
+interface PaymentService {
+  fun processPayment(amount: Double): PaymentResult
+  fun refundPayment(transactionId: String): RefundResult
+}
+
+@Retry(with = WorkflowRetryPolicy::class)
+interface BookingWorkflow {
+  fun processBooking(bookingId: String): BookingResult
+}
+```
+
+### On Methods
+
+Apply different retry policies to specific methods:
+
+```kotlin
+import io.infinitic.annotations.Retry
+
+interface PaymentService {
+  @Retry(with = AggressiveRetryPolicy::class)
+  fun chargeCard(cardInfo: CardInfo): PaymentResult
+  
+  @Retry(with = ConservativeRetryPolicy::class)
+  fun refund(transactionId: String): RefundResult
+}
+```
+
+## Retry Policy Examples
+
+### Exponential Backoff
+
+```kotlin
+import io.infinitic.tasks.WithRetry
+import io.infinitic.exceptions.tasks.TaskFailedException
+
+class ExponentialRetryPolicy : WithRetry {
+  override fun getSecondsBeforeRetry(
+    retry: Int,
+    exception: TaskFailedException
+  ): Double? {
+    return when {
+      retry >= 10 -> null // Max 10 retries
+      else -> Math.pow(2.0, retry.toDouble()) // 1, 2, 4, 8, 16... seconds
+    }
+  }
+}
+```
+
+### Linear Backoff
+
+```kotlin
+class LinearRetryPolicy : WithRetry {
+  override fun getSecondsBeforeRetry(
+    retry: Int,
+    exception: TaskFailedException
+  ): Double? {
+    return when {
+      retry >= 5 -> null
+      else -> (retry + 1) * 5.0 // 5, 10, 15, 20, 25 seconds
+    }
+  }
+}
+```
+
+### Conditional Retry
+
+```kotlin
+import java.net.SocketTimeoutException
+import java.sql.SQLException
+
+class ConditionalRetryPolicy : WithRetry {
+  override fun getSecondsBeforeRetry(
+    retry: Int,
+    exception: TaskFailedException
+  ): Double? {
+    // Get the root cause
+    val cause = exception.cause?.cause
+    
+    return when {
+      // Don't retry validation errors
+      cause is IllegalArgumentException -> null
+      
+      // Retry network errors aggressively
+      cause is SocketTimeoutException -> {
+        if (retry >= 20) null else 1.0
+      }
+      
+      // Retry database errors with backoff
+      cause is SQLException -> {
+        if (retry >= 5) null else (retry * 3.0)
+      }
+      
+      // Default: retry up to 3 times with 10 second delay
+      else -> if (retry >= 3) null else 10.0
+    }
+  }
+}
+```
+
+### Fixed Delay
+
+```kotlin
+class FixedDelayRetryPolicy : WithRetry {
+  override fun getSecondsBeforeRetry(
+    retry: Int,
+    exception: TaskFailedException
+  ): Double? {
+    return when {
+      retry >= 3 -> null
+      else -> 30.0 // Always wait 30 seconds between retries
+    }
+  }
+}
+```
+
+### Immediate Retry with Limit
+
+```kotlin
+class ImmediateRetryPolicy : WithRetry {
+  override fun getSecondsBeforeRetry(
+    retry: Int,
+    exception: TaskFailedException
+  ): Double? {
+    return when {
+      retry >= 3 -> null
+      else -> 0.0 // Retry immediately
+    }
+  }
+}
+```
+
+## Method vs Class Priority
+
+When both class and method have `@Retry` annotations, the method annotation takes precedence:
+
+```kotlin
+@Retry(with = DefaultRetryPolicy::class)
+interface PaymentService {
+  // Uses DefaultRetryPolicy
+  fun processPayment(amount: Double): PaymentResult
+  
+  // Uses SpecialRetryPolicy (overrides class-level)
+  @Retry(with = SpecialRetryPolicy::class)
+  fun processCriticalPayment(amount: Double): PaymentResult
+}
+```
+
+## Integration with Configuration
+
+Retry policies can also be configured in YAML (takes precedence over annotations):
+
+```yaml
+services:
+  - name: PaymentService
+    class: com.example.PaymentServiceImpl
+    executor:
+      concurrency: 10
+      withRetry: com.example.CustomRetryPolicy
+```
+
+## Best Practices
+
+1. **Use exponential backoff for external services**: Prevents overwhelming downstream systems
+2. **Set reasonable maximum retries**: Avoid infinite retry loops
+3. **Consider the error type**: Not all errors should be retried (e.g., validation errors)
+4. **Log retry attempts**: Include retry count in logs for debugging
+5. **Use different policies for different criticality**: Critical operations may need more retries
+6. **Account for total duration**: Consider maximum time spent retrying
+
+## Complete Example
+
+```kotlin
+import io.infinitic.annotations.Retry
+import io.infinitic.tasks.WithRetry
+import io.infinitic.exceptions.tasks.TaskFailedException
+import java.net.ConnectException
+
+// Define retry policy
+class PaymentRetryPolicy : WithRetry {
+  override fun getSecondsBeforeRetry(
+    retry: Int,
+    exception: TaskFailedException
+  ): Double? {
+    val cause = exception.cause?.cause
+    
+    return when {
+      // Don't retry business logic errors
+      cause is IllegalArgumentException -> null
+      cause is IllegalStateException -> null
+      
+      // Retry network errors up to 10 times with exponential backoff
+      cause is ConnectException -> {
+        if (retry >= 10) null else Math.pow(2.0, retry.toDouble())
+      }
+      
+      // Default: retry 5 times with linear backoff
+      else -> if (retry >= 5) null else (retry * 2.0)
+    }
+  }
+}
+
+// Apply to service
+@Retry(with = PaymentRetryPolicy::class)
+interface PaymentService {
+  fun processPayment(amount: Double): PaymentResult
+  
+  // This method never retries
+  @Retry(with = NoRetryPolicy::class)
+  fun validatePayment(amount: Double): ValidationResult
+}
+
+class NoRetryPolicy : WithRetry {
+  override fun getSecondsBeforeRetry(
+    retry: Int,
+    exception: TaskFailedException
+  ): Double? = null // Never retry
+}
+
+// Implementation
+class PaymentServiceImpl : PaymentService {
+  override fun processPayment(amount: Double): PaymentResult {
+    // This will be retried according to PaymentRetryPolicy
+    return callExternalPaymentGateway(amount)
+  }
+  
+  override fun validatePayment(amount: Double): ValidationResult {
+    // This will never be retried
+    require(amount > 0) { "Amount must be positive" }
+    return ValidationResult.valid()
+  }
+}
+```
+
+## Monitoring Retries
+
+Retries generate events that can be monitored:
+
+```kotlin
+class PaymentServiceImpl : PaymentService {
+  override fun processPayment(amount: Double): PaymentResult {
+    val attempt = Task.retry // Current retry attempt (0 for first try)
+    if (attempt > 0) {
+      logger.warn("Retrying payment processing, attempt: $attempt")
+    }
+    return callPaymentGateway(amount)
+  }
+}
+```
+
+## See Also
+
+- [Timeout Annotation](/api/annotations/timeout) - For timeout configuration
+- [Name Annotation](/api/annotations/name) - For custom naming
+- [Worker Configuration](/api/config/worker-config) - For retry configuration

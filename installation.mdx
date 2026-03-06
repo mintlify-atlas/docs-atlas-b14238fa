@@ -1,0 +1,488 @@
+---
+title: Installation
+description: Set up Infinitic in your project with Gradle or Maven
+---
+
+Infinitic is distributed as Maven artifacts through Maven Central. This guide covers installation for both development and production environments.
+
+## Prerequisites
+
+Before installing Infinitic, ensure you have:
+
+- **JDK 17 or higher** - Infinitic requires Java 17+
+- **Kotlin or Java project** - Infinitic works with both languages
+- **Build tool** - Gradle or Maven
+
+## Dependencies
+
+Infinitic is organized into several modules. The core modules you'll need are:
+
+| Module | Purpose |
+|--------|--------|
+| `infinitic-client` | Client API for starting and managing workflows |
+| `infinitic-worker` | Worker runtime for executing services and workflows |
+| `infinitic-transport-pulsar` | Apache Pulsar transport implementation |
+| `infinitic-storage` | Storage implementations (Redis, PostgreSQL, MySQL) |
+| `infinitic-transport-inMemory` | In-memory transport for testing |
+
+## Gradle Setup
+
+<Steps>
+
+<Step title="Configure Gradle with Kotlin DSL">
+
+Add Infinitic dependencies to your `build.gradle.kts`:
+
+```kotlin build.gradle.kts
+plugins {
+    kotlin("jvm") version "2.1.0"
+    application
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Core Infinitic dependencies
+    implementation("io.infinitic:infinitic-worker:0.18.2")
+    implementation("io.infinitic:infinitic-client:0.18.2")
+    
+    // Transport (choose one)
+    implementation("io.infinitic:infinitic-transport-pulsar:0.18.2")
+    
+    // Storage (choose one or more)
+    implementation("io.infinitic:infinitic-storage:0.18.2")
+    
+    // Optional: In-memory transport for testing
+    testImplementation("io.infinitic:infinitic-transport-inMemory:0.18.2")
+    
+    // Kotlin coroutines (if using Kotlin)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:1.10.1")
+    
+    // Logging
+    implementation("io.github.oshai:kotlin-logging-jvm:7.0.3")
+    implementation("org.slf4j:slf4j-simple:2.0.16")
+}
+
+kotlin {
+    jvmToolchain(17)
+}
+```
+
+<Note>
+Make sure you're using Java 17 or higher via `jvmToolchain(17)` for compatibility.
+</Note>
+
+</Step>
+
+<Step title="Configure Gradle with Groovy DSL">
+
+For `build.gradle`:
+
+```groovy build.gradle
+plugins {
+    id 'org.jetbrains.kotlin.jvm' version '2.1.0'
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Core Infinitic dependencies
+    implementation 'io.infinitic:infinitic-worker:0.18.2'
+    implementation 'io.infinitic:infinitic-client:0.18.2'
+    
+    // Transport
+    implementation 'io.infinitic:infinitic-transport-pulsar:0.18.2'
+    
+    // Storage
+    implementation 'io.infinitic:infinitic-storage:0.18.2'
+    
+    // Optional: Testing
+    testImplementation 'io.infinitic:infinitic-transport-inMemory:0.18.2'
+    
+    // Kotlin coroutines
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:1.10.1'
+    
+    // Logging
+    implementation 'io.github.oshai:kotlin-logging-jvm:7.0.3'
+    implementation 'org.slf4j:slf4j-simple:2.0.16'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+```
+
+</Step>
+
+</Steps>
+
+## Maven Setup
+
+Add Infinitic dependencies to your `pom.xml`:
+
+```xml pom.xml
+<project>
+    <properties>
+        <kotlin.version>2.1.0</kotlin.version>
+        <infinitic.version>0.18.2</infinitic.version>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+    </properties>
+    
+    <dependencies>
+        <!-- Core Infinitic dependencies -->
+        <dependency>
+            <groupId>io.infinitic</groupId>
+            <artifactId>infinitic-worker</artifactId>
+            <version>${infinitic.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.infinitic</groupId>
+            <artifactId>infinitic-client</artifactId>
+            <version>${infinitic.version}</version>
+        </dependency>
+        
+        <!-- Transport -->
+        <dependency>
+            <groupId>io.infinitic</groupId>
+            <artifactId>infinitic-transport-pulsar</artifactId>
+            <version>${infinitic.version}</version>
+        </dependency>
+        
+        <!-- Storage -->
+        <dependency>
+            <groupId>io.infinitic</groupId>
+            <artifactId>infinitic-storage</artifactId>
+            <version>${infinitic.version}</version>
+        </dependency>
+        
+        <!-- Optional: In-memory transport for testing -->
+        <dependency>
+            <groupId>io.infinitic</groupId>
+            <artifactId>infinitic-transport-inMemory</artifactId>
+            <version>${infinitic.version}</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- Kotlin standard library -->
+        <dependency>
+            <groupId>org.jetbrains.kotlin</groupId>
+            <artifactId>kotlin-stdlib</artifactId>
+            <version>${kotlin.version}</version>
+        </dependency>
+        
+        <!-- Kotlin coroutines -->
+        <dependency>
+            <groupId>org.jetbrains.kotlinx</groupId>
+            <artifactId>kotlinx-coroutines-core</artifactId>
+            <version>1.10.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jetbrains.kotlinx</groupId>
+            <artifactId>kotlinx-coroutines-jdk8</artifactId>
+            <version>1.10.1</version>
+        </dependency>
+        
+        <!-- Logging -->
+        <dependency>
+            <groupId>io.github.oshai</groupId>
+            <artifactId>kotlin-logging-jvm</artifactId>
+            <version>7.0.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>2.0.16</version>
+        </dependency>
+    </dependencies>
+    
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-maven-plugin</artifactId>
+                <version>${kotlin.version}</version>
+                <configuration>
+                    <jvmTarget>17</jvmTarget>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+```
+
+<Note>
+Ensure Java 17+ is configured via `maven.compiler.source` and `maven.compiler.target`.
+</Note>
+
+## Snapshot Versions
+
+To use the latest snapshot versions (for testing unreleased features):
+
+<CodeGroup>
+
+```kotlin build.gradle.kts
+repositories {
+    mavenCentral()
+    maven(url = "https://central.sonatype.com/repository/maven-snapshots/")
+}
+
+dependencies {
+    implementation("io.infinitic:infinitic-worker:0.18.2-SNAPSHOT")
+    implementation("io.infinitic:infinitic-client:0.18.2-SNAPSHOT")
+}
+```
+
+```xml pom.xml
+<repositories>
+    <repository>
+        <id>sonatype-snapshots</id>
+        <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+        <snapshots>
+            <enabled>true</enabled>
+        </snapshots>
+    </repository>
+</repositories>
+
+<dependencies>
+    <dependency>
+        <groupId>io.infinitic</groupId>
+        <artifactId>infinitic-worker</artifactId>
+        <version>0.18.2-SNAPSHOT</version>
+    </dependency>
+</dependencies>
+```
+
+</CodeGroup>
+
+<Warning>
+Snapshot versions are unstable and should only be used for development and testing.
+</Warning>
+
+## Infrastructure Setup
+
+Infinitic requires two external dependencies:
+
+### Apache Pulsar (Message Transport)
+
+Infinitic uses Apache Pulsar for reliable message delivery. For development:
+
+```bash
+# Start Pulsar standalone with Docker
+docker run -d \
+  --name pulsar \
+  -p 6650:6650 \
+  -p 8080:8080 \
+  apachepulsar/pulsar:latest \
+  bin/pulsar standalone
+```
+
+For production, consider:
+- [StreamNative Cloud](https://streamnative.io/) (managed Pulsar)
+- [DataStax Astra Streaming](https://www.datastax.com/products/astra-streaming)
+- Self-hosted Pulsar cluster
+
+### Storage (State Persistence)
+
+Infinitic needs storage for workflow state. Supported options:
+
+<CardGroup cols={3}>
+
+<Card title="Redis" icon="database">
+Fast in-memory storage, great for most use cases.
+
+```yaml
+storage:
+  redis:
+    host: localhost
+    port: 6379
+```
+</Card>
+
+<Card title="PostgreSQL" icon="database">
+Relational database with ACID guarantees.
+
+```yaml
+storage:
+  postgres:
+    host: localhost
+    port: 5432
+    database: infinitic
+    username: user
+    password: pass
+```
+</Card>
+
+<Card title="MySQL" icon="database">
+Wide compatibility, good for existing MySQL infrastructure.
+
+```yaml
+storage:
+  mysql:
+    host: localhost
+    port: 3306
+    database: infinitic
+    username: user
+    password: pass
+```
+</Card>
+
+</CardGroup>
+
+### Development Setup
+
+For local development, use in-memory storage:
+
+```yaml infinitic.yml
+storage:
+  inMemory:
+
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://localhost:6650
+    webServiceUrl: http://localhost:8080
+    tenant: infinitic
+    namespace: dev
+```
+
+<Warning>
+In-memory storage loses all data on restart. Only use it for development and testing.
+</Warning>
+
+## Configuration
+
+Create an `infinitic.yml` configuration file:
+
+```yaml infinitic.yml
+# Storage configuration
+storage:
+  redis:
+    host: localhost
+    port: 6379
+    # Optional: authentication
+    # username: myuser
+    # password: mypass
+    # Optional: TLS
+    # ssl: true
+
+# Transport configuration
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://localhost:6650
+    webServiceUrl: http://localhost:8080
+    tenant: infinitic
+    namespace: production
+    # Optional: authentication
+    # authentication:
+    #   issuerUrl: https://auth.example.com
+    #   privateKey: /path/to/key.pem
+    #   audience: pulsar-audience
+
+# Service configuration
+services:
+  - name: MyService
+    executor:
+      class: com.example.MyServiceImpl
+      concurrency: 10
+      # Optional: timeouts and retries
+      # timeout: 60.0
+      # retry:
+      #   maximumRetries: 3
+
+# Workflow configuration
+workflows:
+  - name: MyWorkflow
+    executor:
+      class: com.example.MyWorkflowImpl
+      concurrency: 10
+    # State engine configuration
+    stateEngine:
+      concurrency: 10
+```
+
+## Verify Installation
+
+Create a simple test to verify your setup:
+
+```kotlin Test.kt
+import io.infinitic.clients.InfiniticClient
+import io.infinitic.workers.InfiniticWorker
+
+fun main() {
+    // Test creating a client
+    val client = InfiniticClient.fromYamlFile("infinitic.yml")
+    println("Client created: ${client.getName()}")
+    client.close()
+    
+    // Test creating a worker
+    val worker = InfiniticWorker.fromYamlFile("infinitic.yml")
+    println("Worker created successfully")
+    worker.close()
+    
+    println("Installation verified!")
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+
+<Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+Build your first workflow in minutes
+</Card>
+
+<Card title="Configuration Reference" icon="gear" href="/configuration">
+Detailed configuration options
+</Card>
+
+<Card title="Deploy to Production" icon="cloud" href="/deployment">
+Production deployment best practices
+</Card>
+
+<Card title="API Reference" icon="code" href="/api-reference">
+Complete API documentation
+</Card>
+
+</CardGroup>
+
+## Troubleshooting
+
+### Connection Issues
+
+If you can't connect to Pulsar:
+
+1. Verify Pulsar is running: `docker ps | grep pulsar`
+2. Check the broker URL in your config matches Pulsar's port
+3. Ensure firewall rules allow connections
+
+### Storage Issues
+
+If storage connection fails:
+
+1. Verify your storage service is running
+2. Check credentials and connection strings
+3. Ensure the database/keyspace exists
+
+### Version Compatibility
+
+Infinitic 0.18.2 requires:
+- Java 17 or higher
+- Kotlin 2.0+ (if using Kotlin)
+- Apache Pulsar 4.0+ (compatible with 3.x)
+
+## Getting Help
+
+If you encounter issues:
+
+- Check the [documentation](https://docs.infinitic.io)
+- Visit the [GitHub repository](https://github.com/infiniticio/infinitic)
+- Contact [support](mailto:gilles@infinitic.io)

@@ -1,0 +1,208 @@
+---
+title: Introduction
+description: Welcome to Infinitic - An open source orchestration framework for building durable and flexible backend processes
+---
+
+<div style={{
+  background: 'linear-gradient(135deg, #1484fb 0%, #4a86e9 100%)',
+  borderRadius: '8px',
+  padding: '3rem 2rem',
+  marginBottom: '2rem',
+  color: 'white'
+}}>
+  <h1 style={{ 
+    fontSize: '48px', 
+    fontWeight: '700', 
+    marginBottom: '1rem',
+    color: 'white'
+  }}>
+    Build Durable Workflows with Infinitic
+  </h1>
+  <p style={{ 
+    fontSize: '20px', 
+    marginBottom: '2rem',
+    color: 'rgba(255, 255, 255, 0.9)'
+  }}>
+    An open source orchestration framework for application teams to build durable and flexible backend processes with workflows and microservices.
+  </p>
+  <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+    <a 
+      href="/quickstart" 
+      style={{
+        background: '#2563eb',
+        color: 'white',
+        padding: '12px 24px',
+        borderRadius: '8px',
+        textDecoration: 'none',
+        fontWeight: '600'
+      }}
+    >
+      Get Started
+    </a>
+    <a 
+      href="https://github.com/infiniticio/infinitic" 
+      style={{
+        background: 'transparent',
+        color: 'white',
+        padding: '12px 24px',
+        borderRadius: '8px',
+        textDecoration: 'none',
+        fontWeight: '600',
+        border: '2px solid white'
+      }}
+    >
+      View on GitHub
+    </a>
+  </div>
+</div>
+
+## What is Infinitic?
+
+Infinitic accelerates the implementation of event-driven architectures, reducing development time from months to weeks. It is ideal for backend teams developing applications that are time-dependent, dynamic, or include human interactions.
+
+### Perfect For
+
+<CardGroup cols={2}>
+  <Card title="E-commerce Platforms" icon="shopping-cart">
+    Dynamic inventory management with complex delivery and invoicing processes
+  </Card>
+  <Card title="Financial Systems" icon="dollar-sign">
+    Multi-step transactions with built-in error recovery and manual approval workflows
+  </Card>
+  <Card title="Supply Chain Management" icon="truck">
+    Time-critical logistics coordination across multiple parties
+  </Card>
+  <Card title="Customer Support" icon="headset">
+    Escalation processes that evolve based on complexity with human agent involvement
+  </Card>
+  <Card title="Subscription Services" icon="repeat">
+    Recurring billing cycles with retry mechanisms and manual review for disputes
+  </Card>
+  <Card title="Travel Booking" icon="plane">
+    Orchestrating flight, hotel, and car reservations with fallback options
+  </Card>
+</CardGroup>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Durable Workflows" icon="clock">
+    Workflows remain resilient to service or worker failures, ensuring consistent operation with state persistence
+  </Card>
+  <Card title="Event-Driven Architecture" icon="bolt">
+    Built on Apache Pulsar for exceptional scalability and reliable message delivery
+  </Card>
+  <Card title="Automatic Retry & Timeout" icon="rotate">
+    Built-in error handling with configurable retry policies and timeout management
+  </Card>
+  <Card title="Multiple Storage Backends" icon="database">
+    Support for Redis, MySQL, and PostgreSQL with simple key-value storage
+  </Card>
+  <Card title="Flexible Configuration" icon="gear">
+    Configure via YAML files or programmatic builders for maximum flexibility
+  </Card>
+  <Card title="Enhanced Observability" icon="chart-line">
+    Comprehensive monitoring with CloudEvents integration and built-in dashboard
+  </Card>
+</CardGroup>
+
+## Core Components
+
+Building with Infinitic requires only two key infrastructure components:
+
+<Steps>
+  <Step title="Database for State Storage">
+    A simple key-value database for storing current workflow states. Currently supporting Redis, Postgres, and MySQL, with easy expansion to other databases.
+  </Step>
+  <Step title="Event Streaming Platform">
+    An event streaming platform to securely store and distribute messages. Currently supporting Apache Pulsar with managed instances available.
+  </Step>
+</Steps>
+
+<Note>
+Don't worry about mastering these external dependencies - Infinitic handles everything for you. If you're new to these technologies, [managed instances](https://pulsar.apache.org/) are an excellent solution.
+</Note>
+
+## How It Works
+
+You only need to focus on writing your application-specific code:
+
+### Workflow Workers
+
+Orchestrate the execution of your services. You simply code their description using service interfaces.
+
+```kotlin
+class BookingWorkflow : Workflow() {
+    private val hotelService = newService(HotelService::class.java)
+    private val flightService = newService(FlightService::class.java)
+    
+    fun book(request: BookingRequest): BookingResult {
+        // Orchestrate your services
+        val hotel = hotelService.book(request.hotelId)
+        val flight = flightService.book(request.flightId)
+        
+        return BookingResult(hotel, flight)
+    }
+}
+```
+
+### Service Workers
+
+Execute your services. You implement the actual service logic or API calls, while Infinitic handles all event processing operations.
+
+```kotlin
+class HotelService {
+    fun book(hotelId: String): HotelBooking {
+        // Your actual implementation
+        return callHotelApi(hotelId)
+    }
+}
+```
+
+The Infinitic SDK provides extensive functionalities that you don't have to code and maintain:
+
+- Implementation of event consumers and producers
+- Management of topics: topology, schemas, and creation
+- Error handling in case of failures
+- Data serialization
+- API for building workflows
+
+## Key Benefits
+
+<CardGroup cols={3}>
+  <Card title="Flexibility" icon="wand-magic-sparkles">
+    Harness the full power of programming languages with loops, conditions, and data manipulation to define durable processes
+  </Card>
+  <Card title="Easy Maintenance" icon="wrench">
+    Workflows are easy to understand, consolidated in a single class, and version-controlled like standard code
+  </Card>
+  <Card title="Enhanced Observability" icon="eye">
+    Comprehensive monitoring with detailed insights available on dashboards
+  </Card>
+  <Card title="Unmatched Reliability" icon="shield-check">
+    Workflows remain resilient to service or worker failures, ensuring consistent operation
+  </Card>
+  <Card title="High Scalability" icon="arrow-up-right-dots">
+    Infinitic's core event-driven architecture guarantees exceptional scalability
+  </Card>
+  <Card title="Seamless Integration" icon="plug">
+    Integrate with existing infrastructure without disruption, allowing incremental adoption
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running with Infinitic in minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Install and configure Infinitic for your project
+  </Card>
+  <Card title="Core Concepts" icon="book" href="/concepts/workflows">
+    Learn about workflows, services, and workers
+  </Card>
+  <Card title="Examples" icon="code" href="/examples/hello-world">
+    Explore real-world use cases and examples
+  </Card>
+</CardGroup>

@@ -1,0 +1,424 @@
+---
+title: Calling Services
+description: Learn how to call services from workflows, both synchronously and asynchronously
+---
+
+Workflows orchestrate services by calling their methods. Infinitic provides both synchronous and asynchronous execution patterns.
+
+## Creating Service Stubs
+
+Before calling a service, create a stub using the `newService()` method:
+
+```kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  // Create service stub
+  private val emailService = newService(EmailService::class.java)
+  
+  override fun sendWelcomeEmail(userId: String) {
+    // Call service method
+    emailService.send(userId, "Welcome!")
+  }
+}
+```
+
+## Synchronous Calls
+
+The simplest way to call a service is synchronously. The workflow waits for the service to complete before continuing:
+
+<CodeGroup>
+```kotlin Kotlin
+class OrderWorkflow : Workflow(), OrderWorkflowInterface {
+  private val inventoryService = newService(InventoryService::class.java)
+  private val paymentService = newService(PaymentService::class.java)
+  
+  override fun processOrder(orderId: String): OrderResult {
+    // Sequential execution
+    val items = inventoryService.getItems(orderId)
+    val total = items.sumOf { it.price }
+    val payment = paymentService.charge(orderId, total)
+    
+    return OrderResult(orderId, payment)
+  }
+}
+```
+
+```java Java
+public class OrderWorkflowImpl extends Workflow implements OrderWorkflow {
+  private final InventoryService inventoryService = 
+      newService(InventoryService.class);
+  private final PaymentService paymentService = 
+      newService(PaymentService.class);
+  
+  @Override
+  public OrderResult processOrder(String orderId) {
+    // Sequential execution
+    List<Item> items = inventoryService.getItems(orderId);
+    double total = items.stream()
+        .mapToDouble(Item::getPrice)
+        .sum();
+    Payment payment = paymentService.charge(orderId, total);
+    
+    return new OrderResult(orderId, payment);
+  }
+}
+```
+</CodeGroup>
+
+## Asynchronous Calls with dispatch()
+
+For parallel execution or when you don't need the result immediately, use `dispatch()` to call services asynchronously:
+
+```kotlin
+class OrderWorkflow : Workflow(), OrderWorkflowInterface {
+  private val emailService = newService(EmailService::class.java)
+  private val smsService = newService(SmsService::class.java)
+  private val pushService = newService(PushService::class.java)
+  
+  override fun notifyUser(userId: String, message: String) {
+    // Start all notifications in parallel
+    val emailDeferred = dispatch(emailService::send, userId, message)
+    val smsDeferred = dispatch(smsService::send, userId, message)
+    val pushDeferred = dispatch(pushService::send, userId, message)
+    
+    // Wait for all to complete
+    emailDeferred.await()
+    smsDeferred.await()
+    pushDeferred.await()
+  }
+}
+```
+
+## Working with Deferred Objects
+
+When you call `dispatch()`, you get a `Deferred<T>` object that represents the future result.
+
+### await()
+
+Call `await()` to get the result (blocks until complete):
+
+```kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  private val service = newService(DataService::class.java)
+  
+  override fun processData(input: String): String {
+    val deferred = dispatch(service::process, input)
+    
+    // Do other work here...
+    
+    // Wait for result
+    val result = deferred.await()
+    return result
+  }
+}
+```
+
+### status()
+
+Check the status of a deferred operation:
+
+```kotlin
+import io.infinitic.workflows.DeferredStatus
+
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  private val service = newService(MyService::class.java)
+  
+  override fun checkProgress(): String {
+    val deferred = dispatch(service::longRunningTask)
+    
+    return when (deferred.status()) {
+      DeferredStatus.ONGOING -> "Still running"
+      DeferredStatus.COMPLETED -> "Completed"
+      DeferredStatus.FAILED -> "Failed"
+      DeferredStatus.CANCELED -> "Canceled"
+      DeferredStatus.TIMED_OUT -> "Timed out"
+      DeferredStatus.UNKNOWN -> "Unknown"
+    }
+  }
+}
+```
+
+### Convenience Status Methods
+
+```kotlin
+val deferred = dispatch(service::process, input)
+
+if (deferred.isOngoing()) {
+  // Still running
+}
+
+if (deferred.isCompleted()) {
+  // Completed successfully
+}
+
+if (deferred.isFailed()) {
+  // Failed with error
+}
+
+if (deferred.isCanceled()) {
+  // Was canceled
+}
+```
+
+## Parallel Execution
+
+Dispatch multiple tasks and wait for all to complete:
+
+```kotlin
+class DataWorkflow : Workflow(), DataWorkflowInterface {
+  private val apiService = newService(ApiService::class.java)
+  
+  override fun fetchAllData(userId: String): CombinedData {
+    // Start all requests in parallel
+    val profileDeferred = dispatch(apiService::getProfile, userId)
+    val ordersDeferred = dispatch(apiService::getOrders, userId)
+    val prefsDeferred = dispatch(apiService::getPreferences, userId)
+    
+    // Wait for all results
+    val profile = profileDeferred.await()
+    val orders = ordersDeferred.await()
+    val prefs = prefsDeferred.await()
+    
+    return CombinedData(profile, orders, prefs)
+  }
+}
+```
+
+## Combining Deferred with AND
+
+Use `and()` to wait for multiple deferred objects to complete:
+
+```kotlin
+import io.infinitic.workflows.and
+
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  private val service = newService(MyService::class.java)
+  
+  override fun processMultiple(): List<String> {
+    val d1 = dispatch(service::process, "input1")
+    val d2 = dispatch(service::process, "input2")
+    val d3 = dispatch(service::process, "input3")
+    
+    // Wait for all three to complete
+    val results = (d1 and d2 and d3).await()
+    return results // List<String>
+  }
+  
+  override fun processMany(): List<String> {
+    val deferreds = (1..10).map { 
+      dispatch(service::process, "input$it")
+    }
+    
+    // Wait for all
+    return deferreds.and().await()
+  }
+}
+```
+
+## Racing with OR
+
+Use `or()` to wait for the first deferred to complete:
+
+```kotlin
+import io.infinitic.workflows.or
+
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  private val primaryService = newService(PrimaryService::class.java)
+  private val backupService = newService(BackupService::class.java)
+  
+  override fun fetchWithFallback(query: String): String {
+    val primary = dispatch(primaryService::fetch, query)
+    val backup = dispatch(backupService::fetch, query)
+    
+    // Return whichever completes first
+    return when (val result = (primary or backup).await()) {
+      is String -> result
+      else -> throw Exception("Unexpected result type")
+    }
+  }
+}
+```
+
+## Service Stubs with Tags
+
+Route service calls to specific workers using tags:
+
+```kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  // Regular service
+  private val regularService = newService(ProcessingService::class.java)
+  
+  // Service routed to high-priority workers
+  private val priorityService = newService(
+    ProcessingService::class.java,
+    tags = setOf("priority-high", "gpu-enabled")
+  )
+  
+  override fun processData(data: Data, isPriority: Boolean) {
+    if (isPriority) {
+      priorityService.process(data)
+    } else {
+      regularService.process(data)
+    }
+  }
+}
+```
+
+## Service Stubs with Metadata
+
+Pass metadata with service calls for tracing or context:
+
+```kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  override fun processOrder(orderId: String) {
+    // Create service with metadata
+    val service = newService(
+      OrderService::class.java,
+      meta = mapOf(
+        "orderId" to orderId.toByteArray(),
+        "workflowId" to workflowId.toByteArray(),
+        "traceId" to generateTraceId().toByteArray()
+      )
+    )
+    
+    service.process(orderId)
+  }
+}
+```
+
+## Void Methods
+
+For service methods that return `void` or `Unit`, use `dispatchVoid()`:
+
+```kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  private val loggingService = newService(LoggingService::class.java)
+  
+  override fun logEvent(event: String) {
+    // Dispatch void method
+    val deferred = dispatchVoid(loggingService::log, event)
+    
+    // Wait for completion
+    deferred.await()
+  }
+}
+```
+
+## Error Handling
+
+Service errors propagate to the workflow. Handle them with try-catch:
+
+```kotlin
+class MyWorkflow : Workflow(), MyWorkflowInterface {
+  private val paymentService = newService(PaymentService::class.java)
+  private val notificationService = newService(NotificationService::class.java)
+  
+  override fun processPayment(userId: String, amount: Double): PaymentResult {
+    try {
+      val payment = paymentService.charge(userId, amount)
+      notificationService.sendSuccess(userId)
+      return PaymentResult.success(payment)
+      
+    } catch (e: InsufficientFundsException) {
+      notificationService.sendFailure(userId, "Insufficient funds")
+      return PaymentResult.failure("Insufficient funds")
+      
+    } catch (e: Exception) {
+      notificationService.sendFailure(userId, "Payment failed")
+      throw e // Re-throw for workflow retry
+    }
+  }
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use async dispatch for parallel operations">
+    When tasks don't depend on each other, dispatch them in parallel:
+    
+    ```kotlin
+    // ❌ Sequential (slow)
+    val result1 = service1.call()
+    val result2 = service2.call()
+    val result3 = service3.call()
+    
+    // ✅ Parallel (fast)
+    val d1 = dispatch(service1::call)
+    val d2 = dispatch(service2::call)
+    val d3 = dispatch(service3::call)
+    val results = (d1 and d2 and d3).await()
+    ```
+  </Accordion>
+  
+  <Accordion title="Create service stubs as properties">
+    Initialize service stubs once as class properties:
+    
+    ```kotlin
+    // ✅ Good
+    class MyWorkflow : Workflow(), MyWorkflowInterface {
+      private val service = newService(MyService::class.java)
+    }
+    
+    // ❌ Bad - creates new stub on every call
+    class MyWorkflow : Workflow(), MyWorkflowInterface {
+      override fun process() {
+        val service = newService(MyService::class.java)
+      }
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Don't store Deferred objects as properties">
+    Use deferred objects locally within methods:
+    
+    ```kotlin
+    // ❌ Wrong
+    class MyWorkflow : Workflow(), MyWorkflowInterface {
+      lateinit var deferred: Deferred<String>
+    }
+    
+    // ✅ Correct
+    class MyWorkflow : Workflow(), MyWorkflowInterface {
+      override fun process(): String {
+        val deferred = dispatch(service::call)
+        return deferred.await()
+      }
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Use tags for routing">
+    Route specific tasks to specialized workers:
+    
+    ```kotlin
+    // GPU-intensive task
+    private val mlService = newService(
+      MLService::class.java,
+      tags = setOf("gpu-enabled")
+    )
+    
+    // High-priority task
+    private val urgentService = newService(
+      ProcessingService::class.java,
+      tags = setOf("priority-high")
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Sub-workflows" icon="sitemap" href="/workflows/sub-workflows">
+    Learn how to call workflows from workflows
+  </Card>
+  <Card title="Channels" icon="tower-broadcast" href="/workflows/channels">
+    Receive external signals during execution
+  </Card>
+  <Card title="Timers" icon="timer" href="/workflows/timers">
+    Add delays and timeouts
+  </Card>
+  <Card title="Workflow Methods" icon="function" href="/workflows/workflow-methods">
+    Complete method reference
+  </Card>
+</CardGroup>

@@ -1,0 +1,258 @@
+---
+title: 'Tags'
+description: 'Organize and query workflows using tags'
+icon: 'tags'
+---
+
+Tags provide a flexible way to organize, query, and manage workflows in Infinitic. You can use tags to group related workflows, implement custom routing, or enable business-level workflow queries.
+
+## What are Tags?
+
+Tags are string identifiers associated with workflow instances. Unlike workflow IDs (which are auto-generated UUIDs), tags are human-readable labels you define based on your business logic.
+
+### Tag Use Cases
+
+- **User workflows** - Tag with user ID: `user:12345`
+- **Order processing** - Tag with order ID: `order:ORD-2024-001`
+- **Multi-tenancy** - Tag with tenant ID: `tenant:acme-corp`
+- **Workflow groups** - Tag with category: `batch:daily-reports`
+- **Custom IDs** - Use business identifiers instead of UUIDs
+
+## Creating Workflows with Tags
+
+Add tags when creating a new workflow:
+
+```kotlin
+val workflow = client.newWorkflow(
+    MyWorkflow::class.java,
+    tags = setOf("user:12345", "priority:high")
+)
+workflow.process(data)
+```
+
+### Single Tag
+
+```kotlin
+val workflow = client.newWorkflow(
+    MyWorkflow::class.java,
+    tags = setOf("order:ORD-2024-001")
+)
+```
+
+### Multiple Tags
+
+```kotlin
+val workflow = client.newWorkflow(
+    MyWorkflow::class.java,
+    tags = setOf(
+        "user:12345",
+        "tenant:acme-corp",
+        "type:premium",
+        "region:us-west"
+    )
+)
+```
+
+## Retrieving Workflows by Tag
+
+Get a workflow instance using a tag:
+
+```kotlin
+val workflow = client.getWorkflowByTag(
+    MyWorkflow::class.java,
+    "order:ORD-2024-001"
+)
+```
+
+### Send Signals to Tagged Workflows
+
+```kotlin
+val workflow = client.getWorkflowByTag(
+    MyWorkflow::class.java,
+    "user:12345"
+)
+workflow.updateStatus("Processing")
+```
+
+### Cancel Tagged Workflows
+
+```kotlin
+val workflow = client.getWorkflowByTag(
+    MyWorkflow::class.java,
+    "order:ORD-2024-001"
+)
+client.cancelAsync(workflow)
+```
+
+## Custom IDs with Tags
+
+Infinitic supports a special tag format for custom IDs:
+
+```kotlin
+val workflow = client.newWorkflow(
+    OrderWorkflow::class.java,
+    tags = setOf("customId:ORD-2024-001")
+)
+```
+
+The `customId:` prefix indicates this tag represents a unique identifier for the workflow.
+
+### Custom ID Benefits
+
+- **Idempotency** - Use business IDs to prevent duplicate workflows
+- **Natural references** - Use IDs that make sense in your domain
+- **Easy lookups** - Find workflows using business identifiers
+
+```kotlin
+// Check if workflow exists by custom ID
+val existingWorkflow = try {
+    client.getWorkflowByTag(
+        OrderWorkflow::class.java,
+        "customId:${orderId}"
+    )
+} catch (e: WorkflowNotFoundException) {
+    // Create new workflow
+    client.newWorkflow(
+        OrderWorkflow::class.java,
+        tags = setOf("customId:${orderId}")
+    )
+}
+```
+
+## Tag Engine
+
+Infinitic uses a dedicated tag engine to manage the mapping between tags and workflow IDs:
+
+- Tags are stored separately from workflow state
+- Fast tag-based lookups
+- Supports multiple tags per workflow
+- Handles tag storage and retrieval
+
+### Tag Storage
+
+The `WorkflowTagStorage` interface manages tag persistence:
+
+```kotlin
+interface WorkflowTagStorage {
+    suspend fun getWorkflowIds(tag: WorkflowTag, workflowName: WorkflowName): Set<WorkflowId>
+    suspend fun addWorkflowId(tag: WorkflowTag, workflowName: WorkflowName, workflowId: WorkflowId)
+    suspend fun removeWorkflowId(tag: WorkflowTag, workflowName: WorkflowName, workflowId: WorkflowId)
+}
+```
+
+## Tag Patterns
+
+### Hierarchical Tags
+
+```kotlin
+tags = setOf(
+    "tenant:acme",
+    "tenant:acme:department:sales",
+    "tenant:acme:department:sales:team:west"
+)
+```
+
+### Composite Keys
+
+```kotlin
+val tag = "user:${userId}:order:${orderId}"
+val workflow = client.newWorkflow(
+    OrderWorkflow::class.java,
+    tags = setOf(tag)
+)
+```
+
+### Typed Tags
+
+```kotlin
+enum class WorkflowType(val prefix: String) {
+    ORDER("order"),
+    SHIPMENT("shipment"),
+    INVOICE("invoice")
+}
+
+fun createTag(type: WorkflowType, id: String) = "${type.prefix}:${id}"
+
+val workflow = client.newWorkflow(
+    OrderWorkflow::class.java,
+    tags = setOf(createTag(WorkflowType.ORDER, orderId))
+)
+```
+
+## Tag Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use consistent tag formats">
+    Define a standard format for tags across your application (e.g., `type:value`).
+  </Accordion>
+
+  <Accordion title="Keep tags immutable">
+    Tags are set at workflow creation and cannot be changed. Design accordingly.
+  </Accordion>
+
+  <Accordion title="Use namespaced tags">
+    Prefix tags with their type or category to avoid collisions (`user:`, `order:`, etc.).
+  </Accordion>
+
+  <Accordion title="Limit tag count">
+    While multiple tags are supported, excessive tags can impact performance.
+  </Accordion>
+
+  <Accordion title="Document tag conventions">
+    Maintain documentation of your tag naming conventions and usage patterns.
+  </Accordion>
+
+  <Accordion title="Use custom IDs for uniqueness">
+    When workflows need unique business identifiers, use the `customId:` prefix.
+  </Accordion>
+</AccordionGroup>
+
+## Tag Limitations
+
+- Tags are immutable after workflow creation
+- Tag queries return the workflow stub, not workflow state
+- A tag can map to multiple workflow IDs
+- Tags are case-sensitive
+
+## Example: Multi-Tenant System
+
+```kotlin
+class TenantWorkflowManager(private val client: InfiniticClient) {
+    
+    fun startTenantWorkflow(tenantId: String, userId: String, workflowType: String) {
+        val workflow = client.newWorkflow(
+            TenantWorkflow::class.java,
+            tags = setOf(
+                "tenant:${tenantId}",
+                "user:${userId}",
+                "type:${workflowType}",
+                "customId:${tenantId}:${userId}:${workflowType}"
+            )
+        )
+        workflow.start()
+    }
+    
+    fun getUserWorkflow(tenantId: String, userId: String): TenantWorkflow {
+        return client.getWorkflowByTag(
+            TenantWorkflow::class.java,
+            "user:${userId}"
+        )
+    }
+    
+    fun cancelTenantWorkflows(tenantId: String) {
+        // Note: This cancels one workflow with this tag
+        // For multiple workflows, you'd need to track workflow IDs
+        val workflow = client.getWorkflowByTag(
+            TenantWorkflow::class.java,
+            "tenant:${tenantId}"
+        )
+        client.cancelAsync(workflow)
+    }
+}
+```
+
+## Related Topics
+
+- [Metadata](/advanced/metadata) - Attach custom data to workflows
+- [CloudEvents](/advanced/cloud-events) - Monitor workflows with tags in events
+- [Monitoring](/advanced/monitoring) - Track workflows by tag

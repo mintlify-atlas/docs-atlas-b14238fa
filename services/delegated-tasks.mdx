@@ -1,0 +1,553 @@
+---
+title: Delegated Tasks
+description: Integrate with external systems and long-running operations using the @Delegated annotation
+---
+
+## What are Delegated Tasks?
+
+Delegated tasks allow you to hand off task completion to external systems. Instead of completing synchronously within the service method, delegated tasks:
+
+1. Start an external process
+2. Return immediately (the return value is ignored)
+3. Complete later when the external system calls back
+
+This is perfect for:
+- Integration with external APIs that use webhooks
+- Long-running operations managed by external systems
+- Event-driven architectures
+- Human-in-the-loop workflows
+
+## The @Delegated Annotation
+
+Location in source code: `io.infinitic.annotations.Delegated`
+
+```kotlin
+import io.infinitic.annotations.Delegated
+
+@Target(AnnotationTarget.FUNCTION)
+annotation class Delegated()
+```
+
+The `@Delegated` annotation marks a service method as delegated. When applied:
+
+- The method's return value is ignored
+- The task remains in a "running" state until explicitly completed
+- External systems must call `completeTask()` to finish the task
+
+## Basic Usage
+
+```kotlin
+import io.infinitic.annotations.Delegated
+import io.infinitic.tasks.Task
+
+interface PaymentService {
+  fun processPayment(amount: Double, currency: String): PaymentResult
+}
+
+class PaymentServiceImpl(
+  private val externalPaymentSystem: ExternalPaymentSystem
+) : PaymentService {
+  
+  @Delegated
+  override fun processPayment(amount: Double, currency: String): PaymentResult {
+    val taskId = Task.taskId
+    val serviceName = Task.serviceName
+    
+    // Send payment request to external system
+    externalPaymentSystem.initiatePayment(
+      amount = amount,
+      currency = currency,
+      callbackUrl = "https://your-webhook-endpoint.com/payment-callback",
+      metadata = mapOf(
+        "taskId" to taskId,
+        "serviceName" to serviceName
+      )
+    )
+    
+    // This return value is ignored
+    return PaymentResult.PENDING
+  }
+}
+```
+
+## Completing Delegated Tasks
+
+External systems must complete the task using the Infinitic client:
+
+```kotlin
+import io.infinitic.clients.InfiniticClient
+
+class PaymentWebhookHandler(
+  private val client: InfiniticClient
+) {
+  
+  fun handlePaymentCallback(request: PaymentCallbackRequest) {
+    val taskId = request.metadata["taskId"]!!
+    val serviceName = request.metadata["serviceName"]!!
+    
+    // Create the result
+    val result = when (request.status) {
+      "success" -> PaymentResult(
+        success = true,
+        transactionId = request.transactionId,
+        timestamp = request.timestamp
+      )
+      else -> PaymentResult(
+        success = false,
+        error = request.errorMessage
+      )
+    }
+    
+    // Complete the task
+    client.completeTask(
+      serviceName = serviceName,
+      taskId = taskId,
+      result = result
+    )
+  }
+}
+```
+
+## Accessing Task Information
+
+Within a delegated task, you have access to all task context information:
+
+```kotlin
+import io.infinitic.annotations.Delegated
+import io.infinitic.tasks.Task
+
+class NotificationServiceImpl : NotificationService {
+  
+  @Delegated
+  override fun sendApprovalRequest(userId: String, message: String): ApprovalResult {
+    val taskId = Task.taskId
+    val serviceName = Task.serviceName
+    val workflowId = Task.workflowId
+    val tags = Task.tags
+    
+    // Store task information for later completion
+    approvalSystem.createApproval(
+      approvalId = taskId,
+      userId = userId,
+      message = message,
+      metadata = mapOf(
+        "taskId" to taskId,
+        "serviceName" to serviceName,
+        "workflowId" to workflowId,
+        "tags" to tags
+      )
+    )
+    
+    // Return value is ignored
+    return ApprovalResult.PENDING
+  }
+}
+```
+
+## Use Cases
+
+### Human-in-the-Loop Workflows
+
+Delegated tasks are perfect for workflows requiring human approval:
+
+```kotlin
+interface ApprovalService {
+  fun requestApproval(request: ApprovalRequest): ApprovalDecision
+}
+
+class ApprovalServiceImpl(
+  private val approvalSystem: ApprovalSystem
+) : ApprovalService {
+  
+  @Delegated
+  override fun requestApproval(request: ApprovalRequest): ApprovalDecision {
+    val taskId = Task.taskId
+    val serviceName = Task.serviceName
+    
+    // Send approval request to human approvers
+    approvalSystem.sendToApprovers(
+      approvers = request.approvers,
+      subject = request.subject,
+      details = request.details,
+      onDecision = { decision ->
+        // Completion happens in callback
+        completeApproval(serviceName, taskId, decision)
+      }
+    )
+    
+    return ApprovalDecision.PENDING
+  }
+  
+  private fun completeApproval(
+    serviceName: String,
+    taskId: String,
+    decision: ApprovalDecision
+  ) {
+    Task.client.completeTask(serviceName, taskId, decision)
+  }
+}
+```
+
+### External API Integration
+
+Integrate with third-party services that use webhooks:
+
+```kotlin
+interface TranscriptionService {
+  fun transcribeAudio(audioUrl: String): TranscriptionResult
+}
+
+class TranscriptionServiceImpl(
+  private val transcriptionAPI: TranscriptionAPI
+) : TranscriptionService {
+  
+  @Delegated
+  override fun transcribeAudio(audioUrl: String): TranscriptionResult {
+    val taskId = Task.taskId
+    val serviceName = Task.serviceName
+    
+    // Start transcription with webhook callback
+    transcriptionAPI.startTranscription(
+      audioUrl = audioUrl,
+      webhookUrl = "https://your-app.com/webhooks/transcription",
+      metadata = mapOf(
+        "taskId" to taskId,
+        "serviceName" to serviceName
+      )
+    )
+    
+    return TranscriptionResult.PROCESSING
+  }
+}
+
+// Webhook handler
+class TranscriptionWebhookHandler(
+  private val client: InfiniticClient
+) {
+  
+  @PostMapping("/webhooks/transcription")
+  fun handleTranscription(@RequestBody webhook: TranscriptionWebhook) {
+    val result = TranscriptionResult(
+      text = webhook.text,
+      confidence = webhook.confidence,
+      duration = webhook.duration
+    )
+    
+    client.completeTask(
+      serviceName = webhook.metadata["serviceName"]!!,
+      taskId = webhook.metadata["taskId"]!!,
+      result = result
+    )
+  }
+}
+```
+
+### Long-Running Batch Jobs
+
+Delegate completion to external batch processing systems:
+
+```kotlin
+interface DataProcessingService {
+  fun processBigData(datasetId: String): ProcessingResult
+}
+
+class DataProcessingServiceImpl(
+  private val sparkCluster: SparkCluster
+) : DataProcessingService {
+  
+  @Delegated
+  override fun processBigData(datasetId: String): ProcessingResult {
+    val taskId = Task.taskId
+    val serviceName = Task.serviceName
+    
+    // Submit Spark job
+    val jobId = sparkCluster.submitJob(
+      jobType = "data-processing",
+      dataset = datasetId,
+      callbacks = JobCallbacks(
+        onComplete = { result ->
+          Task.client.completeTask(
+            serviceName = serviceName,
+            taskId = taskId,
+            result = ProcessingResult(
+              status = "completed",
+              recordsProcessed = result.recordCount,
+              outputPath = result.outputPath
+            )
+          )
+        },
+        onFailure = { error ->
+          Task.client.completeTask(
+            serviceName = serviceName,
+            taskId = taskId,
+            result = ProcessingResult(
+              status = "failed",
+              error = error.message
+            )
+          )
+        }
+      )
+    )
+    
+    return ProcessingResult.SUBMITTED
+  }
+}
+```
+
+## Error Handling
+
+Delegated tasks can complete with errors by passing an exception:
+
+```kotlin
+class WebhookHandler(private val client: InfiniticClient) {
+  
+  fun handleCallback(request: CallbackRequest) {
+    val taskId = request.taskId
+    val serviceName = request.serviceName
+    
+    if (request.failed) {
+      // Complete with failure
+      client.completeTask(
+        serviceName = serviceName,
+        taskId = taskId,
+        error = Exception("External system failed: ${request.errorMessage}")
+      )
+    } else {
+      // Complete with success
+      client.completeTask(
+        serviceName = serviceName,
+        taskId = taskId,
+        result = processResult(request)
+      )
+    }
+  }
+}
+```
+
+When a delegated task fails, it follows the standard retry policy:
+
+```kotlin
+import io.infinitic.annotations.Retry
+import io.infinitic.tasks.WithRetry
+
+class ExponentialRetry : WithRetry {
+  override fun getSecondsBeforeRetry(retry: Int, e: Exception): Double? {
+    return if (retry < 3) Math.pow(2.0, retry.toDouble()) else null
+  }
+}
+
+@Retry(ExponentialRetry::class)
+class PaymentServiceImpl : PaymentService {
+  
+  @Delegated
+  override fun processPayment(amount: Double, currency: String): PaymentResult {
+    // If this fails or completes with error, it will be retried
+    // according to the ExponentialRetry policy
+  }
+}
+```
+
+## Storing Task Information
+
+For reliable completion, store task information persistently:
+
+```kotlin
+class EmailServiceImpl(
+  private val emailProvider: EmailProvider,
+  private val taskStore: TaskStore
+) : EmailService {
+  
+  @Delegated
+  override fun sendEmailWithTracking(to: String, subject: String, body: String): EmailResult {
+    val taskId = Task.taskId
+    val serviceName = Task.serviceName
+    
+    // Store task information in database
+    taskStore.save(DelegatedTaskData(
+      taskId = taskId,
+      serviceName = serviceName,
+      createdAt = Instant.now(),
+      metadata = Task.meta
+    ))
+    
+    // Send email with tracking
+    emailProvider.sendWithTracking(
+      to = to,
+      subject = subject,
+      body = body,
+      trackingId = taskId
+    )
+    
+    return EmailResult.SENT
+  }
+}
+
+// Background job to check email delivery status
+class EmailStatusChecker(
+  private val taskStore: TaskStore,
+  private val emailProvider: EmailProvider,
+  private val client: InfiniticClient
+) {
+  
+  @Scheduled(fixedDelay = 60000) // Check every minute
+  fun checkPendingEmails() {
+    val pendingTasks = taskStore.findPending()
+    
+    pendingTasks.forEach { taskData ->
+      val status = emailProvider.getDeliveryStatus(taskData.taskId)
+      
+      if (status.isComplete) {
+        client.completeTask(
+          serviceName = taskData.serviceName,
+          taskId = taskData.taskId,
+          result = EmailResult(
+            delivered = status.delivered,
+            deliveredAt = status.timestamp
+          )
+        )
+        
+        taskStore.markCompleted(taskData.taskId)
+      }
+    }
+  }
+}
+```
+
+## Best Practices
+
+### Always Store Task Identifiers
+
+Ensure external systems can identify which task to complete:
+
+```kotlin
+@Delegated
+override fun startProcess(data: ProcessData): ProcessResult {
+  val taskId = Task.taskId
+  val serviceName = Task.serviceName
+  
+  // ✅ Good: Include both identifiers
+  externalSystem.start(
+    data = data,
+    taskId = taskId,
+    serviceName = serviceName
+  )
+  
+  return ProcessResult.STARTED
+}
+```
+
+### Implement Idempotent Completion
+
+Handle duplicate completion calls gracefully:
+
+```kotlin
+class WebhookHandler(private val client: InfiniticClient) {
+  
+  fun handleCallback(request: CallbackRequest) {
+    try {
+      client.completeTask(
+        serviceName = request.serviceName,
+        taskId = request.taskId,
+        result = request.result
+      )
+    } catch (e: TaskAlreadyCompletedException) {
+      // Task was already completed, ignore
+      logger.info("Task ${request.taskId} already completed")
+    }
+  }
+}
+```
+
+### Set Appropriate Timeouts
+
+Delegated tasks should have timeouts to prevent hanging indefinitely:
+
+```kotlin
+import io.infinitic.annotations.Timeout
+import io.infinitic.tasks.WithTimeout
+
+class OneHourTimeout : WithTimeout {
+  override fun getTimeoutSeconds(): Double = 3600.0
+}
+
+class ApprovalServiceImpl : ApprovalService {
+  
+  @Delegated
+  @Timeout(OneHourTimeout::class)
+  override fun requestApproval(request: ApprovalRequest): ApprovalDecision {
+    // Will timeout after 1 hour if not completed
+  }
+}
+```
+
+### Monitor Delegated Tasks
+
+Implement monitoring to track delegated task completion rates:
+
+```kotlin
+class DelegatedTaskMonitor(
+  private val client: InfiniticClient,
+  private val metrics: MetricsCollector
+) {
+  
+  @Scheduled(fixedDelay = 300000) // Every 5 minutes
+  fun checkStuckTasks() {
+    val stuckTasks = findTasksStuckInDelegation()
+    
+    stuckTasks.forEach { task ->
+      metrics.recordStuckTask(task)
+      logger.warn("Task ${task.taskId} stuck in delegation for ${task.duration}")
+    }
+  }
+}
+```
+
+## Testing Delegated Tasks
+
+```kotlin
+import io.infinitic.tasks.Task
+import org.junit.jupiter.api.Test
+import org.mockito.Mockito.*
+
+class PaymentServiceTest {
+  
+  @Test
+  fun `test delegated payment processing`() {
+    // Mock external system
+    val externalSystem = mock(ExternalPaymentSystem::class.java)
+    val service = PaymentServiceImpl(externalSystem)
+    
+    // Set up task context
+    val mockContext = createMockTaskContext(
+      taskId = "test-task-123",
+      serviceName = "PaymentService"
+    )
+    Task.setContext(mockContext)
+    
+    // Call delegated method
+    service.processPayment(100.0, "USD")
+    
+    // Verify external system was called
+    verify(externalSystem).initiatePayment(
+      amount = 100.0,
+      currency = "USD",
+      callbackUrl = any(),
+      metadata = argThat { map ->
+        map["taskId"] == "test-task-123" &&
+        map["serviceName"] == "PaymentService"
+      }
+    )
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Batching" icon="layer-group" href="/services/batching">
+    Process multiple tasks efficiently with batch operations
+  </Card>
+  <Card title="Service Context" icon="layer-group" href="/services/service-context">
+    Learn more about accessing task information
+  </Card>
+</CardGroup>

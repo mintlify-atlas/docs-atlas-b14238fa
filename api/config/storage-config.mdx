@@ -1,0 +1,535 @@
+---
+title: Storage Configuration
+description: Configure state persistence storage for Infinitic
+---
+
+The storage configuration defines how Infinitic persists workflow state, tags, and task metadata.
+
+## Package
+
+```kotlin
+io.infinitic.storage.config.StorageConfig
+```
+
+## Supported Storage Backends
+
+Infinitic supports multiple storage backends:
+
+1. **Redis** - Fast in-memory data store (recommended for production)
+2. **PostgreSQL** - Relational database
+3. **MySQL** - Relational database
+4. **InMemory** - In-memory storage (for testing only)
+
+## Common Properties
+
+All storage configurations support:
+
+<ParamField path="compression" type="CompressionConfig" >
+  Compression configuration to reduce storage size
+  
+  <ParamField path="mode" type="String" >
+    Compression algorithm: `"gzip"` or `"none"`
+  </ParamField>
+  
+  ```yaml
+  compression:
+    mode: gzip
+  ```
+</ParamField>
+
+<ParamField path="cache" type="CacheConfig" >
+  Cache configuration to improve performance
+  
+  <ParamField path="caffeine" type="CaffeineCacheConfig" >
+    Caffeine cache configuration
+    
+    <ParamField path="maximumSize" type="Long" >
+      Maximum number of entries in cache
+    </ParamField>
+    
+    <ParamField path="expireAfterAccess" type="Long" >
+      Seconds before cache entry expires after last access
+    </ParamField>
+    
+    <ParamField path="expireAfterWrite" type="Long" >
+      Seconds before cache entry expires after creation
+    </ParamField>
+  </ParamField>
+  
+  ```yaml
+  cache:
+    caffeine:
+      maximumSize: 10000
+      expireAfterAccess: 3600
+  ```
+</ParamField>
+
+## Redis Storage
+
+### Configuration Properties
+
+<ParamField path="redis.host" type="String" required>
+  Redis server hostname
+</ParamField>
+
+<ParamField path="redis.port" type="Int" required>
+  Redis server port
+</ParamField>
+
+<ParamField path="redis.username" type="String" >
+  Redis username (for Redis 6+ ACL)
+</ParamField>
+
+<ParamField path="redis.password" type="String" >
+  Redis password
+</ParamField>
+
+<ParamField path="redis.database" type="Int" default="0">
+  Redis database number (0-15)
+</ParamField>
+
+<ParamField path="redis.timeout" type="Int" default="2000">
+  Connection timeout in milliseconds
+</ParamField>
+
+<ParamField path="redis.ssl" type="Boolean" default="false">
+  Enable SSL/TLS connection
+</ParamField>
+
+<ParamField path="redis.poolConfig" type="PoolConfig" >
+  Connection pool configuration
+  
+  <ParamField path="maxTotal" type="Int" default="8">
+    Maximum total connections
+  </ParamField>
+  
+  <ParamField path="maxIdle" type="Int" default="8">
+    Maximum idle connections
+  </ParamField>
+  
+  <ParamField path="minIdle" type="Int" default="0">
+    Minimum idle connections
+  </ParamField>
+</ParamField>
+
+### Example Redis YAML Configuration
+
+```yaml
+storage:
+  redis:
+    host: redis.example.com
+    port: 6379
+    username: infinitic
+    password: ${REDIS_PASSWORD}
+    database: 0
+    timeout: 5000
+    ssl: true
+    poolConfig:
+      maxTotal: 20
+      maxIdle: 10
+      minIdle: 2
+  compression:
+    mode: gzip
+  cache:
+    caffeine:
+      maximumSize: 10000
+      expireAfterAccess: 3600
+```
+
+### Kotlin Redis Configuration
+
+```kotlin
+import io.infinitic.storage.config.RedisStorageConfig
+import io.infinitic.storage.config.RedisConfig
+import io.infinitic.storage.compression.CompressionConfig
+import io.infinitic.cache.config.CaffeineCacheConfig
+
+val storageConfig = RedisStorageConfig.builder()
+  .setHost("localhost")
+  .setPort(6379)
+  .setDatabase(0)
+  .setPassword("secret")
+  .setSsl(true)
+  .setPoolConfig(
+    RedisConfig.PoolConfig.builder()
+      .setMaxTotal(20)
+      .setMaxIdle(10)
+      .setMinIdle(2)
+      .build()
+  )
+  .setCompression(CompressionConfig.gzip())
+  .setCache(
+    CaffeineCacheConfig.builder()
+      .setMaximumSize(10000)
+      .setExpireAfterAccess(3600)
+      .build()
+  )
+  .build()
+```
+
+## PostgreSQL Storage
+
+### Configuration Properties
+
+<ParamField path="postgres.host" type="String" required>
+  PostgreSQL server hostname
+</ParamField>
+
+<ParamField path="postgres.port" type="Int" required>
+  PostgreSQL server port
+</ParamField>
+
+<ParamField path="postgres.username" type="String" required>
+  PostgreSQL username
+</ParamField>
+
+<ParamField path="postgres.password" type="String" >
+  PostgreSQL password
+</ParamField>
+
+<ParamField path="postgres.database" type="String" default="infinitic">
+  Database name
+</ParamField>
+
+<ParamField path="postgres.schema" type="String" default="infinitic">
+  Schema name
+</ParamField>
+
+<ParamField path="postgres.keySetTable" type="String" default="key_set_storage">
+  Table name for key-set storage
+</ParamField>
+
+<ParamField path="postgres.keyValueTable" type="String" default="key_value_storage">
+  Table name for key-value storage
+</ParamField>
+
+<ParamField path="postgres.maximumPoolSize" type="Int" default="10">
+  Maximum connection pool size
+</ParamField>
+
+<ParamField path="postgres.minimumIdle" type="Int" default="10">
+  Minimum idle connections
+</ParamField>
+
+<ParamField path="postgres.idleTimeout" type="Long" default="600000">
+  Idle timeout in milliseconds (10 minutes)
+</ParamField>
+
+<ParamField path="postgres.connectionTimeout" type="Long" default="30000">
+  Connection timeout in milliseconds (30 seconds)
+</ParamField>
+
+<ParamField path="postgres.maxLifetime" type="Long" default="1800000">
+  Maximum connection lifetime in milliseconds (30 minutes)
+</ParamField>
+
+### Example PostgreSQL YAML Configuration
+
+```yaml
+storage:
+  postgres:
+    host: postgres.example.com
+    port: 5432
+    username: infinitic
+    password: ${POSTGRES_PASSWORD}
+    database: infinitic
+    schema: infinitic
+    keySetTable: key_set_storage
+    keyValueTable: key_value_storage
+    maximumPoolSize: 20
+    minimumIdle: 5
+    idleTimeout: 600000
+    connectionTimeout: 30000
+    maxLifetime: 1800000
+  compression:
+    mode: gzip
+  cache:
+    caffeine:
+      maximumSize: 10000
+      expireAfterAccess: 3600
+```
+
+### Kotlin PostgreSQL Configuration
+
+```kotlin
+import io.infinitic.storage.config.PostgresStorageConfig
+import io.infinitic.storage.compression.CompressionConfig
+import io.infinitic.cache.config.CaffeineCacheConfig
+
+val storageConfig = PostgresStorageConfig.builder()
+  .setHost("localhost")
+  .setPort(5432)
+  .setUsername("infinitic")
+  .setPassword("secret")
+  .setDatabase("infinitic")
+  .setSchema("infinitic")
+  .setMaximumPoolSize(20)
+  .setMinimumIdle(5)
+  .setCompression(CompressionConfig.gzip())
+  .setCache(
+    CaffeineCacheConfig.builder()
+      .setMaximumSize(10000)
+      .setExpireAfterAccess(3600)
+      .build()
+  )
+  .build()
+```
+
+### Database Schema
+
+Infinitic automatically creates required tables:
+
+```sql
+-- Key-value storage table
+CREATE TABLE infinitic.key_value_storage (
+  key TEXT PRIMARY KEY,
+  value BYTEA NOT NULL
+);
+
+-- Key-set storage table
+CREATE TABLE infinitic.key_set_storage (
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  PRIMARY KEY (key, value)
+);
+
+CREATE INDEX idx_key_set_key ON infinitic.key_set_storage(key);
+```
+
+## MySQL Storage
+
+### Configuration Properties
+
+Similar to PostgreSQL with MySQL-specific defaults:
+
+<ParamField path="mysql.host" type="String" required>
+  MySQL server hostname
+</ParamField>
+
+<ParamField path="mysql.port" type="Int" required>
+  MySQL server port
+</ParamField>
+
+<ParamField path="mysql.username" type="String" required>
+  MySQL username
+</ParamField>
+
+<ParamField path="mysql.password" type="String" >
+  MySQL password
+</ParamField>
+
+<ParamField path="mysql.database" type="String" default="infinitic">
+  Database name
+</ParamField>
+
+<ParamField path="mysql.keySetTable" type="String" default="key_set_storage">
+  Table name for key-set storage
+</ParamField>
+
+<ParamField path="mysql.keyValueTable" type="String" default="key_value_storage">
+  Table name for key-value storage
+</ParamField>
+
+### Example MySQL YAML Configuration
+
+```yaml
+storage:
+  mysql:
+    host: mysql.example.com
+    port: 3306
+    username: infinitic
+    password: ${MYSQL_PASSWORD}
+    database: infinitic
+    keySetTable: key_set_storage
+    keyValueTable: key_value_storage
+    maximumPoolSize: 20
+    minimumIdle: 5
+  compression:
+    mode: gzip
+  cache:
+    caffeine:
+      maximumSize: 10000
+      expireAfterAccess: 3600
+```
+
+## InMemory Storage
+
+For testing and development only:
+
+```yaml
+storage:
+  inMemory: {}
+```
+
+```kotlin
+import io.infinitic.storage.config.InMemoryStorageConfig
+
+val storageConfig = InMemoryStorageConfig()
+```
+
+**Warning**: InMemory storage loses all data when the worker stops.
+
+## Best Practices
+
+### Production Configuration
+
+```yaml
+storage:
+  redis:  # or postgres/mysql
+    host: redis-cluster.prod.example.com
+    port: 6379
+    password: ${REDIS_PASSWORD}
+    database: 0
+    ssl: true
+    poolConfig:
+      maxTotal: 50
+      maxIdle: 20
+      minIdle: 5
+  compression:
+    mode: gzip  # Reduce storage costs
+  cache:
+    caffeine:
+      maximumSize: 50000
+      expireAfterAccess: 7200  # 2 hours
+```
+
+### Development Configuration
+
+```yaml
+storage:
+  redis:
+    host: localhost
+    port: 6379
+    database: 0
+  cache:
+    caffeine:
+      maximumSize: 1000
+      expireAfterAccess: 600
+```
+
+### Testing Configuration
+
+```yaml
+storage:
+  inMemory: {}
+```
+
+## Performance Tuning
+
+### Redis Optimization
+
+1. **Use connection pooling**: Set appropriate `maxTotal` and `minIdle`
+2. **Enable pipelining**: Reduces network round-trips
+3. **Use Redis Cluster**: For horizontal scaling
+4. **Monitor memory usage**: Set `maxmemory` policy
+5. **Use persistence**: Enable AOF or RDB for durability
+
+### PostgreSQL Optimization
+
+1. **Index optimization**: Ensure indexes on `key` columns
+2. **Connection pooling**: Tune `maximumPoolSize` and `minimumIdle`
+3. **Vacuum regularly**: Prevent table bloat
+4. **Partition tables**: For large datasets
+5. **Monitor query performance**: Use `pg_stat_statements`
+
+### Cache Tuning
+
+```yaml
+cache:
+  caffeine:
+    maximumSize: 50000        # Adjust based on memory
+    expireAfterAccess: 3600   # 1 hour
+    expireAfterWrite: 7200    # 2 hours
+```
+
+## Monitoring
+
+### Redis Metrics
+
+```bash
+# Monitor Redis
+redis-cli INFO stats
+redis-cli INFO memory
+redis-cli DBSIZE
+```
+
+### PostgreSQL Metrics
+
+```sql
+-- Check table sizes
+SELECT 
+  schemaname,
+  tablename,
+  pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size
+FROM pg_tables
+WHERE schemaname = 'infinitic';
+
+-- Check query performance
+SELECT * FROM pg_stat_statements
+WHERE query LIKE '%key_value_storage%'
+ORDER BY total_exec_time DESC
+LIMIT 10;
+```
+
+## Backup and Recovery
+
+### Redis Backup
+
+```bash
+# Save snapshot
+redis-cli SAVE
+
+# Copy RDB file
+cp /var/lib/redis/dump.rdb /backup/dump-$(date +%Y%m%d).rdb
+```
+
+### PostgreSQL Backup
+
+```bash
+# Backup database
+pg_dump -h localhost -U infinitic infinitic > backup-$(date +%Y%m%d).sql
+
+# Restore database
+psql -h localhost -U infinitic infinitic < backup-20240101.sql
+```
+
+## Migration
+
+To migrate between storage backends:
+
+1. Stop all workers
+2. Export data from old storage
+3. Import data to new storage
+4. Update configuration
+5. Start workers with new configuration
+
+## Troubleshooting
+
+### Connection Issues
+
+```yaml
+# Enable storage logging
+logging:
+  level:
+    io.infinitic.storage: DEBUG
+    io.infinitic.cache: DEBUG
+```
+
+### High Memory Usage
+
+1. Reduce cache size
+2. Enable compression
+3. Increase expiration times
+4. Monitor workflow state sizes
+
+### Slow Queries
+
+1. Check database indexes
+2. Increase connection pool size
+3. Enable query logging
+4. Optimize database configuration
+
+## See Also
+
+- [Worker Configuration](/api/config/worker-config)
+- [Transport Configuration](/api/config/transport-config)

@@ -1,0 +1,394 @@
+---
+title: Worker Configuration
+description: Configuration options for Infinitic workers
+---
+
+The worker configuration defines how Infinitic workers process tasks and workflows, including transport settings, storage, services, and workflows.
+
+## Package
+
+```kotlin
+io.infinitic.workers.config.InfiniticWorkerConfig
+```
+
+## Configuration Methods
+
+### From YAML File
+
+```kotlin
+val worker = InfiniticWorker.fromYamlFile("/path/to/worker.yml")
+```
+
+### From YAML Resource
+
+```kotlin
+val worker = InfiniticWorker.fromYamlResource("worker.yml")
+```
+
+### From Builder
+
+```kotlin
+val worker = InfiniticWorker.builder()
+  .setTransport(transportConfig)
+  .setStorage(storageConfig)
+  .addService(serviceConfig)
+  .addWorkflow(workflowConfig)
+  .build()
+```
+
+## Configuration Properties
+
+<ParamField path="name" type="String" >
+  Optional name for the worker (used for logging and monitoring)
+  
+  ```yaml
+  name: worker-1
+  ```
+</ParamField>
+
+<ParamField path="transport" type="TransportConfig" required>
+  Transport configuration (message broker settings)
+  
+  See [Transport Configuration](/api/config/transport-config)
+</ParamField>
+
+<ParamField path="storage" type="StorageConfig" >
+  Default storage configuration for state persistence
+  
+  See [Storage Configuration](/api/config/storage-config)
+</ParamField>
+
+<ParamField path="logs" type="LogsConfig" >
+  Logging configuration
+  
+  ```yaml
+  logs:
+    beautify: true  # Pretty-print CloudEvent logs
+  ```
+</ParamField>
+
+<ParamField path="services" type="List<ServiceConfig>" >
+  List of service configurations (task executors)
+</ParamField>
+
+<ParamField path="workflows" type="List<WorkflowConfig>" >
+  List of workflow configurations
+</ParamField>
+
+<ParamField path="eventListener" type="EventListenerConfig" >
+  Optional event listener for monitoring workflow and task events
+</ParamField>
+
+## Service Configuration
+
+<ParamField path="services[].name" type="String" required>
+  Service name (matches @Name annotation or class name)
+</ParamField>
+
+<ParamField path="services[].class" type="String" required>
+  Fully qualified class name of the service implementation
+</ParamField>
+
+<ParamField path="services[].executor" type="ServiceExecutorConfig" >
+  Executor configuration for running service tasks
+  
+  <ParamField path="concurrency" type="Int" default="10">
+    Number of tasks to process concurrently
+  </ParamField>
+  
+  <ParamField path="withTimeout" type="String" >
+    Fully qualified class name of WithTimeout implementation
+  </ParamField>
+  
+  <ParamField path="withRetry" type="String" >
+    Fully qualified class name of WithRetry implementation
+  </ParamField>
+  
+  <ParamField path="batch" type="BatchConfig" >
+    Batch processing configuration
+    
+    <ParamField path="maxMessages" type="Int" >
+      Maximum messages per batch
+    </ParamField>
+    
+    <ParamField path="maxSeconds" type="Double" >
+      Maximum seconds to wait for batch
+    </ParamField>
+  </ParamField>
+  
+  <ParamField path="retryHandlerConcurrency" type="Int" >
+    Concurrency for retry handler (defaults to concurrency)
+  </ParamField>
+  
+  <ParamField path="eventHandlerConcurrency" type="Int" >
+    Concurrency for event handler (defaults to concurrency)
+  </ParamField>
+</ParamField>
+
+<ParamField path="services[].tagEngine" type="ServiceTagEngineConfig" >
+  Tag engine configuration for service
+  
+  <ParamField path="concurrency" type="Int" default="5">
+    Concurrency for tag operations
+  </ParamField>
+  
+  <ParamField path="storage" type="StorageConfig" >
+    Storage for tags (overrides default)
+  </ParamField>
+</ParamField>
+
+## Workflow Configuration
+
+<ParamField path="workflows[].name" type="String" required>
+  Workflow name (matches @Name annotation or class name)
+</ParamField>
+
+<ParamField path="workflows[].class" type="String" required>
+  Fully qualified class name of the workflow implementation
+</ParamField>
+
+<ParamField path="workflows[].executor" type="WorkflowExecutorConfig" >
+  Executor configuration for running workflow tasks
+  
+  Parameters same as service executor (concurrency, withTimeout, withRetry, batch, etc.)
+</ParamField>
+
+<ParamField path="workflows[].tagEngine" type="WorkflowTagEngineConfig" >
+  Tag engine configuration for workflow
+  
+  <ParamField path="concurrency" type="Int" default="5">
+    Concurrency for tag operations
+  </ParamField>
+  
+  <ParamField path="storage" type="StorageConfig" >
+    Storage for tags
+  </ParamField>
+  
+  <ParamField path="batch" type="BatchConfig" >
+    Batch configuration for tag operations
+  </ParamField>
+</ParamField>
+
+<ParamField path="workflows[].stateEngine" type="WorkflowStateEngineConfig" >
+  State engine configuration for workflow persistence
+  
+  <ParamField path="concurrency" type="Int" default="10">
+    Concurrency for state operations
+  </ParamField>
+  
+  <ParamField path="storage" type="StorageConfig" required>
+    Storage for workflow state
+  </ParamField>
+  
+  <ParamField path="batch" type="BatchConfig" >
+    Batch configuration for state operations
+  </ParamField>
+  
+  <ParamField path="commandHandlerConcurrency" type="Int" >
+    Concurrency for command handler (defaults to concurrency)
+  </ParamField>
+  
+  <ParamField path="timerHandlerConcurrency" type="Int" >
+    Concurrency for timer handler (defaults to concurrency)
+  </ParamField>
+  
+  <ParamField path="eventHandlerConcurrency" type="Int" >
+    Concurrency for event handler (defaults to concurrency)
+  </ParamField>
+</ParamField>
+
+## Example YAML Configuration
+
+```yaml
+name: payment-worker
+
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://localhost:6650
+    webServiceUrl: http://localhost:8080
+    tenant: infinitic
+    namespace: dev
+
+storage:
+  redis:
+    host: localhost
+    port: 6379
+    database: 0
+  compression:
+    mode: gzip
+  cache:
+    caffeine:
+      maximumSize: 10000
+      expireAfterAccess: 3600
+
+logs:
+  beautify: true
+
+services:
+  - name: PaymentService
+    class: com.example.payment.PaymentServiceImpl
+    executor:
+      concurrency: 20
+      withTimeout: com.example.payment.PaymentTimeout
+      withRetry: com.example.payment.PaymentRetryPolicy
+      batch:
+        maxMessages: 50
+        maxSeconds: 1.0
+    tagEngine:
+      concurrency: 5
+
+  - name: EmailService
+    class: com.example.notification.EmailServiceImpl
+    executor:
+      concurrency: 10
+      batch:
+        maxMessages: 100
+        maxSeconds: 0.5
+
+workflows:
+  - name: BookingWorkflow
+    class: com.example.booking.BookingWorkflowImpl
+    executor:
+      concurrency: 10
+      withTimeout: com.example.booking.WorkflowTimeout
+    tagEngine:
+      concurrency: 5
+      batch:
+        maxMessages: 50
+        maxSeconds: 1.0
+    stateEngine:
+      concurrency: 10
+      batch:
+        maxMessages: 50
+        maxSeconds: 1.0
+      timerHandlerConcurrency: 5
+
+eventListener:
+  class: com.example.monitoring.WorkflowEventListener
+  concurrency: 5
+  subscriptionName: event-listener-subscription
+```
+
+## Complete Kotlin Configuration
+
+```kotlin
+import io.infinitic.workers.InfiniticWorker
+import io.infinitic.workers.config.*
+import io.infinitic.storage.config.RedisStorageConfig
+import io.infinitic.storage.compression.CompressionConfig
+import io.infinitic.cache.config.CaffeineCacheConfig
+
+val storageConfig = RedisStorageConfig.builder()
+  .setHost("localhost")
+  .setPort(6379)
+  .setDatabase(0)
+  .setCompression(CompressionConfig.gzip())
+  .setCache(
+    CaffeineCacheConfig.builder()
+      .setMaximumSize(10000)
+      .setExpireAfterAccess(3600)
+      .build()
+  )
+  .build()
+
+val serviceConfig = ServiceConfig(
+  name = "PaymentService",
+  factory = { PaymentServiceImpl() },
+  executor = ServiceExecutorConfig(
+    concurrency = 20,
+    withTimeout = PaymentTimeout::class.java,
+    withRetry = PaymentRetryPolicy::class.java,
+    batch = BatchConfig(
+      maxMessages = 50,
+      maxSeconds = 1.0
+    )
+  ),
+  tagEngine = ServiceTagEngineConfig(
+    concurrency = 5,
+    storage = storageConfig
+  )
+)
+
+val workflowConfig = WorkflowConfig(
+  name = "BookingWorkflow",
+  factories = listOf({ BookingWorkflowImpl() }),
+  executor = WorkflowExecutorConfig(
+    concurrency = 10
+  ),
+  tagEngine = WorkflowTagEngineConfig(
+    concurrency = 5,
+    storage = storageConfig
+  ),
+  stateEngine = WorkflowStateEngineConfig(
+    concurrency = 10,
+    storage = storageConfig
+  )
+)
+
+val worker = InfiniticWorker(
+  InfiniticWorkerConfig(
+    name = "payment-worker",
+    transport = transportConfig,
+    storage = storageConfig,
+    services = listOf(serviceConfig),
+    workflows = listOf(workflowConfig)
+  )
+)
+
+worker.start()
+```
+
+## Best Practices
+
+1. **Set appropriate concurrency**: Balance throughput and resource usage
+2. **Configure storage**: Use persistent storage (Redis, PostgreSQL) for production
+3. **Enable caching**: Improve performance with Caffeine cache
+4. **Use compression**: Reduce storage size with gzip compression
+5. **Monitor batch sizes**: Tune batch settings based on workload
+6. **Separate workers**: Use different workers for different services/workflows
+7. **Configure retries**: Set retry policies appropriate for your use case
+8. **Set timeouts**: Prevent tasks from running indefinitely
+
+## Performance Tuning
+
+### High Throughput
+
+```yaml
+services:
+  - name: HighThroughputService
+    executor:
+      concurrency: 50
+      batch:
+        maxMessages: 200
+        maxSeconds: 0.5
+```
+
+### Low Latency
+
+```yaml
+services:
+  - name: LowLatencyService
+    executor:
+      concurrency: 20
+      batch:
+        maxMessages: 10
+        maxSeconds: 0.1
+```
+
+### Resource Constrained
+
+```yaml
+services:
+  - name: LightweightService
+    executor:
+      concurrency: 5
+      batch:
+        maxMessages: 20
+        maxSeconds: 2.0
+```
+
+## See Also
+
+- [Transport Configuration](/api/config/transport-config)
+- [Storage Configuration](/api/config/storage-config)
+- [InfiniticWorker](/api/infinitic-worker)

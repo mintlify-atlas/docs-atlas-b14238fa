@@ -1,0 +1,349 @@
+---
+title: Client Configuration
+description: Configuration options for Infinitic clients
+---
+
+The client configuration defines how Infinitic clients connect to the message broker and dispatch workflows.
+
+## Package
+
+```kotlin
+io.infinitic.clients.config.InfiniticClientConfig
+```
+
+## Configuration Methods
+
+### From YAML File
+
+```kotlin
+val client = InfiniticClient.fromYamlFile("/path/to/client.yml")
+```
+
+### From YAML Resource
+
+```kotlin
+val client = InfiniticClient.fromYamlResource("client.yml")
+```
+
+### From Builder
+
+```kotlin
+val client = InfiniticClient.builder()
+  .setName("my-client")
+  .setTransport(transportConfig)
+  .build()
+```
+
+## Configuration Properties
+
+<ParamField path="name" type="String" >
+  Optional name for the client (used for message routing and logging)
+  
+  If not set, a random name will be generated.
+  
+  ```yaml
+  name: web-app-client
+  ```
+</ParamField>
+
+<ParamField path="transport" type="TransportConfig" required>
+  Transport configuration (message broker settings)
+  
+  See [Transport Configuration](/api/config/transport-config)
+</ParamField>
+
+## Example YAML Configuration
+
+### Pulsar Transport
+
+```yaml
+name: booking-client
+
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://localhost:6650
+    webServiceUrl: http://localhost:8080
+    tenant: infinitic
+    namespace: prod
+    allowedClusters:
+      - pulsar-cluster-1
+      - pulsar-cluster-2
+    shutdownGracePeriodSeconds: 30
+```
+
+### In-Memory Transport (Testing)
+
+```yaml
+name: test-client
+
+transport:
+  inMemory:
+    shutdownGracePeriodSeconds: 5
+```
+
+## Kotlin Configuration
+
+### Using Builder
+
+```kotlin
+import io.infinitic.clients.InfiniticClient
+import io.infinitic.transport.pulsar.config.PulsarTransportConfig
+
+val transportConfig = PulsarTransportConfig.builder()
+  .setBrokerServiceUrl("pulsar://localhost:6650")
+  .setWebServiceUrl("http://localhost:8080")
+  .setTenant("infinitic")
+  .setNamespace("prod")
+  .setAllowedClusters(setOf("pulsar-cluster-1"))
+  .build()
+
+val client = InfiniticClient.builder()
+  .setName("booking-client")
+  .setTransport(transportConfig)
+  .build()
+```
+
+### Using Config Object
+
+```kotlin
+import io.infinitic.clients.config.InfiniticClientConfig
+
+val config = InfiniticClientConfig(
+  name = "booking-client",
+  transport = transportConfig
+)
+
+val client = InfiniticClient(config)
+```
+
+## Usage Example
+
+```kotlin
+import io.infinitic.clients.InfiniticClient
+
+fun main() {
+  // Create client from YAML
+  val client = InfiniticClient.fromYamlResource("client.yml")
+  
+  try {
+    // Create workflow stub
+    val workflow = client.newWorkflow(
+      BookingWorkflow::class.java,
+      tags = setOf("customer-12345")
+    )
+    
+    // Start workflow
+    val deferred = client.startAsync {
+      workflow.processBooking("booking-789")
+    }.join()
+    
+    println("Workflow started: ${deferred.id}")
+    
+    // Wait for result
+    val result = deferred.await()
+    println("Result: $result")
+    
+  } finally {
+    client.close()
+  }
+}
+```
+
+## Multiple Clients
+
+You can create multiple clients with different configurations:
+
+```kotlin
+// Client for high-priority workflows
+val priorityClient = InfiniticClient.builder()
+  .setName("priority-client")
+  .setTransport(priorityTransportConfig)
+  .build()
+
+// Client for background workflows
+val backgroundClient = InfiniticClient.builder()
+  .setName("background-client")
+  .setTransport(backgroundTransportConfig)
+  .build()
+```
+
+## Client Lifecycle
+
+### Opening a Client
+
+```kotlin
+val client = InfiniticClient.fromYamlResource("client.yml")
+// Client is ready to use
+```
+
+### Closing a Client
+
+```kotlin
+// Explicit close
+client.close()
+
+// Or use try-with-resources (AutoCloseable)
+client.use { client ->
+  // Use client
+} // Automatically closed
+```
+
+### Graceful Shutdown
+
+When closing, the client:
+1. Stops accepting new requests
+2. Waits for ongoing messages to be sent (up to shutdownGracePeriodSeconds)
+3. Closes transport connections
+4. Deletes temporary topics
+
+```yaml
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://localhost:6650
+    shutdownGracePeriodSeconds: 30  # Wait up to 30 seconds
+```
+
+## Thread Safety
+
+The `InfiniticClient` is thread-safe and can be shared across multiple threads:
+
+```kotlin
+class BookingService(
+  private val client: InfiniticClient
+) {
+  fun createBooking(bookingId: String) {
+    // Safe to call from multiple threads
+    val workflow = client.newWorkflow(BookingWorkflow::class.java)
+    client.startAsync { workflow.processBooking(bookingId) }
+  }
+}
+```
+
+## Best Practices
+
+1. **Reuse client instances**: Create one client and share it across your application
+2. **Set meaningful names**: Use names that identify the client's purpose
+3. **Configure grace period**: Set appropriate shutdown grace period for your workload
+4. **Close properly**: Always close clients to release resources
+5. **Handle errors**: Wrap client operations in try-catch blocks
+6. **Use connection pooling**: Let the transport handle connection pooling
+7. **Monitor client metrics**: Track message send rates and failures
+
+## Configuration in Spring Boot
+
+```kotlin
+import io.infinitic.clients.InfiniticClient
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+import javax.annotation.PreDestroy
+
+@Configuration
+class InfiniticConfig {
+  
+  private lateinit var client: InfiniticClient
+  
+  @Bean
+  fun infiniticClient(): InfiniticClient {
+    client = InfiniticClient.fromYamlResource("infinitic-client.yml")
+    return client
+  }
+  
+  @PreDestroy
+  fun closeClient() {
+    if (::client.isInitialized) {
+      client.close()
+    }
+  }
+}
+```
+
+Usage:
+
+```kotlin
+@Service
+class BookingService(
+  private val client: InfiniticClient
+) {
+  fun startBookingWorkflow(bookingId: String): String {
+    val workflow = client.newWorkflow(BookingWorkflow::class.java)
+    val deferred = client.startAsync {
+      workflow.processBooking(bookingId)
+    }.join()
+    return deferred.id ?: "unknown"
+  }
+}
+```
+
+## Environment-Specific Configuration
+
+### Development
+
+```yaml
+name: dev-client
+
+transport:
+  inMemory:  # Use in-memory for local development
+    shutdownGracePeriodSeconds: 5
+```
+
+### Staging
+
+```yaml
+name: staging-client
+
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://staging-pulsar:6650
+    webServiceUrl: http://staging-pulsar:8080
+    tenant: infinitic
+    namespace: staging
+    shutdownGracePeriodSeconds: 15
+```
+
+### Production
+
+```yaml
+name: prod-client
+
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://prod-pulsar:6650
+    webServiceUrl: http://prod-pulsar:8080
+    tenant: infinitic
+    namespace: prod
+    allowedClusters:
+      - pulsar-prod-1
+      - pulsar-prod-2
+      - pulsar-prod-3
+    shutdownGracePeriodSeconds: 30
+```
+
+## Monitoring
+
+```kotlin
+val client = InfiniticClient.fromYamlResource("client.yml")
+
+// Log client name
+println("Client name: ${client.getName()}")
+
+// Track workflow starts
+val workflow = client.newWorkflow(BookingWorkflow::class.java)
+try {
+  val startTime = System.currentTimeMillis()
+  val deferred = client.startAsync { workflow.processBooking(id) }.join()
+  val duration = System.currentTimeMillis() - startTime
+  
+  metrics.recordWorkflowStart("BookingWorkflow", duration)
+  logger.info("Workflow started in ${duration}ms: ${deferred.id}")
+} catch (e: Exception) {
+  metrics.recordWorkflowStartFailure("BookingWorkflow")
+  logger.error("Failed to start workflow", e)
+  throw e
+}
+```
+
+## See Also
+
+- [Transport Configuration](/api/config/transport-config)
+- [InfiniticClient](/api/infinitic-client)
+- [Worker Configuration](/api/config/worker-config)

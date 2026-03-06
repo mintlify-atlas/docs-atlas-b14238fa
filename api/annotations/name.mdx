@@ -1,0 +1,186 @@
+---
+title: "@Name"
+description: Define custom names for services, workflows, and methods
+---
+
+The `@Name` annotation allows you to specify a custom name for services, workflows, or methods instead of using the default class or method name.
+
+## Package
+
+```kotlin
+io.infinitic.annotations.Name
+```
+
+## Targets
+
+- Classes (services and workflows)
+- Methods (service methods and workflow methods)
+
+## Parameters
+
+<ParamField path="name" type="String" required>
+  The custom name to use
+</ParamField>
+
+## Usage
+
+### On Classes
+
+Define a custom name for a service or workflow:
+
+```kotlin
+import io.infinitic.annotations.Name
+
+@Name("payment-service-v2")
+interface PaymentService {
+  fun processPayment(amount: Double): PaymentResult
+}
+
+@Name("booking-workflow")
+interface BookingWorkflow {
+  fun processBooking(bookingId: String): BookingResult
+}
+```
+
+### On Methods
+
+Define a custom name for a method:
+
+```kotlin
+import io.infinitic.annotations.Name
+
+interface PaymentService {
+  @Name("process-credit-card")
+  fun processCreditCard(cardInfo: CardInfo): PaymentResult
+  
+  @Name("process-paypal")
+  fun processPayPal(email: String): PaymentResult
+}
+```
+
+## Use Cases
+
+### Versioning
+
+Use custom names to support multiple versions of a service:
+
+```kotlin
+@Name("payment-service-v1")
+class PaymentServiceV1 : PaymentService {
+  // Old implementation
+}
+
+@Name("payment-service-v2")
+class PaymentServiceV2 : PaymentService {
+  // New implementation
+}
+```
+
+### Avoiding Conflicts
+
+Prevent naming conflicts when refactoring:
+
+```kotlin
+// Before refactoring
+@Name("legacy-booking")
+class OldBookingWorkflow : BookingWorkflow {
+  // Old implementation
+}
+
+// After refactoring, keeps same name for compatibility
+@Name("legacy-booking")
+class RefactoredBookingWorkflow : BookingWorkflow {
+  // New implementation with same external name
+}
+```
+
+### Human-Readable Names
+
+Use descriptive names for better monitoring and debugging:
+
+```kotlin
+@Name("user-registration-workflow")
+class UserRegistrationWorkflowImpl : UserRegistrationWorkflow {
+  
+  @Name("send-welcome-email")
+  fun sendEmail(userId: String) {
+    // ...
+  }
+}
+```
+
+## Configuration
+
+When using custom names, reference them in your worker configuration:
+
+```yaml
+services:
+  - name: payment-service-v2
+    class: com.example.PaymentServiceImpl
+    executor:
+      concurrency: 10
+
+workflows:
+  - name: booking-workflow
+    class: com.example.BookingWorkflowImpl
+    executor:
+      concurrency: 5
+```
+
+## Best Practices
+
+1. **Use consistent naming conventions**: Choose a convention (kebab-case, snake_case, etc.) and stick to it
+2. **Include versions when applicable**: Makes it easier to run multiple versions side-by-side
+3. **Keep names stable**: Changing names requires migration of running workflows
+4. **Document custom names**: Make sure team members know what names map to what implementations
+
+## Important Notes
+
+- The name must be unique across all services/workflows in your system
+- Changing a name is a breaking change that affects existing workflows
+- Worker configuration must use the custom name, not the class name
+- Client code references use the interface, not the custom name
+
+## Example: Complete Implementation
+
+```kotlin
+import io.infinitic.annotations.Name
+
+// Service definition with custom name
+@Name("payment-processor-v2")
+interface PaymentService {
+  @Name("charge-card")
+  fun chargeCard(amount: Double, cardToken: String): PaymentResult
+  
+  @Name("refund-payment")
+  fun refund(transactionId: String): RefundResult
+}
+
+// Implementation
+class PaymentServiceImpl : PaymentService {
+  override fun chargeCard(amount: Double, cardToken: String): PaymentResult {
+    // Implementation
+    return PaymentResult.success()
+  }
+  
+  override fun refund(transactionId: String): RefundResult {
+    // Implementation
+    return RefundResult.success()
+  }
+}
+
+// Usage in workflow
+class BookingWorkflowImpl : Workflow(), BookingWorkflow {
+  override fun processBooking(bookingId: String): BookingResult {
+    // Service reference uses interface, name is resolved automatically
+    val paymentService = newService(PaymentService::class.java)
+    val payment = dispatch(paymentService::chargeCard, 100.0, "token").await()
+    return BookingResult.success()
+  }
+}
+```
+
+## See Also
+
+- [Retry Annotation](/api/annotations/retry) - For retry policies
+- [Timeout Annotation](/api/annotations/timeout) - For timeout configuration

@@ -1,0 +1,188 @@
+---
+title: Configuration Overview
+description: Learn how to configure Infinitic workers and clients using YAML files or programmatic builders
+---
+
+Infinitic provides flexible configuration options for both workers and clients. You can configure using:
+
+- **YAML files** - Declarative configuration loaded from files
+- **Builders** - Programmatic configuration in Java/Kotlin code
+
+## Configuration Components
+
+Infinitic configuration consists of several key components:
+
+### Worker Configuration
+
+Workers process tasks and workflows. Configure:
+
+- **Transport** - Message broker connection (Pulsar, InMemory)
+- **Storage** - State persistence (PostgreSQL, Redis, InMemory)
+- **Services** - Service executors and tag engines
+- **Workflows** - Workflow executors, state engines, and tag engines
+- **Logs** - Logging configuration
+
+### Client Configuration
+
+Clients submit tasks and workflows. Configure:
+
+- **Transport** - Message broker connection
+- **Name** - Optional client identifier
+
+## Loading Configuration from YAML
+
+### Worker Configuration
+
+```java
+import io.infinitic.workers.InfiniticWorker;
+import io.infinitic.workers.config.InfiniticWorkerConfig;
+
+// From file system
+InfiniticWorkerConfig config = InfiniticWorkerConfig.fromYamlFile("infinitic.yml");
+InfiniticWorker worker = InfiniticWorker.fromConfig(config);
+
+// From resources
+InfiniticWorkerConfig config = InfiniticWorkerConfig.fromYamlResource("infinitic.yml");
+
+// From YAML string
+String yaml = """..."""; 
+InfiniticWorkerConfig config = InfiniticWorkerConfig.fromYamlString(yaml);
+```
+
+### Client Configuration
+
+```java
+import io.infinitic.clients.InfiniticClient;
+import io.infinitic.clients.config.InfiniticClientConfig;
+
+// From file system
+InfiniticClientConfig config = InfiniticClientConfig.fromYamlFile("infinitic.yml");
+InfiniticClient client = InfiniticClient.fromConfig(config);
+
+// From resources
+InfiniticClientConfig config = InfiniticClientConfig.fromYamlResource("infinitic.yml");
+
+// From YAML string
+String yaml = """..."""; 
+InfiniticClientConfig config = InfiniticClientConfig.fromYamlString(yaml);
+```
+
+## Building Configuration Programmatically
+
+### Worker Configuration
+
+```java
+import io.infinitic.workers.config.InfiniticWorkerConfig;
+import io.infinitic.transport.config.PulsarTransportConfig;
+import io.infinitic.storage.config.PostgresStorageConfig;
+
+PulsarTransportConfig transport = PulsarTransportConfig.builder()
+    .setBrokerServiceUrl("pulsar://localhost:6650")
+    .setWebServiceUrl("http://localhost:8080")
+    .setTenant("infinitic")
+    .setNamespace("dev")
+    .build();
+
+PostgresStorageConfig storage = PostgresStorageConfig.builder()
+    .setHost("localhost")
+    .setPort(5432)
+    .setUsername("postgres")
+    .setPassword("password")
+    .build();
+
+InfiniticWorkerConfig config = new InfiniticWorkerConfig(
+    "my-worker",
+    transport,
+    storage,
+    new LogsConfig(),
+    List.of(), // workflows
+    List.of(), // services
+    null
+);
+```
+
+### Client Configuration
+
+```java
+import io.infinitic.clients.config.InfiniticClientConfig;
+import io.infinitic.transport.config.PulsarTransportConfig;
+
+PulsarTransportConfig transport = PulsarTransportConfig.builder()
+    .setBrokerServiceUrl("pulsar://localhost:6650")
+    .setWebServiceUrl("http://localhost:8080")
+    .setTenant("infinitic")
+    .setNamespace("dev")
+    .build();
+
+InfiniticClientConfig config = new InfiniticClientConfig(
+    "my-client",
+    transport
+);
+```
+
+## Configuration Files Structure
+
+### Worker Configuration YAML
+
+```yaml
+name: my-worker
+
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://localhost:6650
+    webServiceUrl: http://localhost:8080
+    tenant: infinitic
+    namespace: dev
+
+storage:
+  postgres:
+    host: localhost
+    port: 5432
+    username: postgres
+    password: password
+    database: infinitic
+
+services:
+  - name: MyService
+    executor:
+      class: com.example.MyServiceImpl
+      concurrency: 10
+
+workflows:
+  - name: MyWorkflow
+    executor:
+      class: com.example.MyWorkflowImpl
+      concurrency: 5
+    stateEngine:
+      concurrency: 5
+```
+
+### Client Configuration YAML
+
+```yaml
+name: my-client
+
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://localhost:6650
+    webServiceUrl: http://localhost:8080
+    tenant: infinitic
+    namespace: dev
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Worker Configuration" icon="server" href="/configuration/workers">
+    Configure workers to process tasks and workflows
+  </Card>
+  <Card title="Client Configuration" icon="laptop" href="/configuration/clients">
+    Configure clients to submit work
+  </Card>
+  <Card title="Transport Configuration" icon="message" href="/configuration/transport">
+    Configure message transport (Pulsar, InMemory)
+  </Card>
+  <Card title="Storage Configuration" icon="database" href="/configuration/storage">
+    Configure state storage (PostgreSQL, Redis, InMemory)
+  </Card>
+</CardGroup>

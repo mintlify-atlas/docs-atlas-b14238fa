@@ -1,0 +1,412 @@
+---
+title: Transport Configuration
+description: Configure message transport for Infinitic using Pulsar or in-memory channels
+---
+
+Infinitic uses a message transport layer to communicate between clients, workers, and services. Transport configuration is required for both workers and clients.
+
+## Available Transports
+
+Infinitic supports two transport implementations:
+
+- **Pulsar** - Production-ready distributed messaging (recommended)
+- **InMemory** - Local development and testing
+
+## Pulsar Transport
+
+Apache Pulsar is the recommended transport for production deployments.
+
+### YAML Configuration
+
+#### Basic Configuration
+
+```yaml
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://localhost:6650
+    webServiceUrl: http://localhost:8080
+    tenant: infinitic
+    namespace: dev
+```
+
+#### Complete Configuration
+
+```yaml
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://pulsar.example.com:6650
+    webServiceUrl: http://pulsar.example.com:8080
+    tenant: infinitic
+    namespace: production
+    shutdownGracePeriodSeconds: 30.0
+    
+    allowedClusters:
+      - cluster-1
+      - cluster-2
+    
+    adminRoles:
+      - admin
+      - operator
+    
+    client:
+      operationTimeout: 30
+      connectionTimeout: 10
+      requestTimeout: 60
+      keepAliveInterval: 30
+      authPluginClassName: org.apache.pulsar.client.impl.auth.AuthenticationToken
+      authParams: token:xxxxx
+    
+    producer:
+      compressionType: LZ4
+      batchingMaxMessages: 1000
+      batchingMaxPublishDelay: 10
+      sendTimeout: 30
+    
+    consumer:
+      receiverQueueSize: 1000
+      acknowledgmentGroupTime: 100
+      subscriptionType: Shared
+```
+
+### Builder Pattern
+
+```java
+import io.infinitic.transport.config.PulsarTransportConfig;
+import io.infinitic.pulsar.config.PulsarClientConfig;
+import io.infinitic.pulsar.config.PulsarProducerConfig;
+import io.infinitic.pulsar.config.PulsarConsumerConfig;
+import io.infinitic.pulsar.config.policies.PoliciesConfig;
+
+PulsarTransportConfig transport = PulsarTransportConfig.builder()
+    .setBrokerServiceUrl("pulsar://localhost:6650")
+    .setWebServiceUrl("http://localhost:8080")
+    .setTenant("infinitic")
+    .setNamespace("dev")
+    .setShutdownGracePeriodSeconds(30.0)
+    .setAllowedClusters(Set.of("cluster-1", "cluster-2"))
+    .setAdminRoles(Set.of("admin", "operator"))
+    .setClientConfig(
+        PulsarClientConfig.builder()
+            .setOperationTimeout(30)
+            .setConnectionTimeout(10)
+            .build()
+    )
+    .setProducerConfig(
+        PulsarProducerConfig.builder()
+            .setCompressionType("LZ4")
+            .setBatchingMaxMessages(1000)
+            .build()
+    )
+    .setConsumerConfig(
+        PulsarConsumerConfig.builder()
+            .setReceiverQueueSize(1000)
+            .setAcknowledgmentGroupTime(100)
+            .build()
+    )
+    .build();
+```
+
+### Configuration Options
+
+#### Core Settings
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `brokerServiceUrl` | String | Yes | Pulsar broker URL (e.g., pulsar://localhost:6650) |
+| `webServiceUrl` | String | Yes | Pulsar web service URL (e.g., http://localhost:8080) |
+| `tenant` | String | Yes | Pulsar tenant name |
+| `namespace` | String | Yes | Pulsar namespace name |
+| `shutdownGracePeriodSeconds` | Double | No | Graceful shutdown duration (default: 30.0) |
+| `allowedClusters` | Set&lt;String&gt; | No | Allowed Pulsar clusters |
+| `adminRoles` | Set&lt;String&gt; | No | Admin role names |
+
+#### Client Settings
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `operationTimeout` | Integer | 30 | Operation timeout in seconds |
+| `connectionTimeout` | Integer | 10 | Connection timeout in seconds |
+| `requestTimeout` | Integer | 60 | Request timeout in seconds |
+| `keepAliveInterval` | Integer | 30 | Keep-alive interval in seconds |
+| `authPluginClassName` | String | null | Authentication plugin class |
+| `authParams` | String | null | Authentication parameters |
+
+#### Producer Settings
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `compressionType` | String | NONE | Compression type (NONE, LZ4, ZLIB, ZSTD, SNAPPY) |
+| `batchingMaxMessages` | Integer | 1000 | Maximum messages per batch |
+| `batchingMaxPublishDelay` | Integer | 10 | Maximum batch delay in milliseconds |
+| `sendTimeout` | Integer | 30 | Send timeout in seconds |
+
+#### Consumer Settings
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `receiverQueueSize` | Integer | 1000 | Receiver queue size |
+| `acknowledgmentGroupTime` | Integer | 100 | Acknowledgment group time in milliseconds |
+| `subscriptionType` | String | Shared | Subscription type (Shared, Exclusive, Failover, Key_Shared) |
+
+### Authentication
+
+#### Token Authentication
+
+```yaml
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://pulsar.example.com:6650
+    webServiceUrl: http://pulsar.example.com:8080
+    tenant: infinitic
+    namespace: production
+    client:
+      authPluginClassName: org.apache.pulsar.client.impl.auth.AuthenticationToken
+      authParams: token:${PULSAR_TOKEN}
+```
+
+#### TLS Authentication
+
+```yaml
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar+ssl://pulsar.example.com:6651
+    webServiceUrl: https://pulsar.example.com:8443
+    tenant: infinitic
+    namespace: production
+    client:
+      authPluginClassName: org.apache.pulsar.client.impl.auth.AuthenticationTls
+      authParams: tlsCertFile:/path/to/cert.pem,tlsKeyFile:/path/to/key.pem
+```
+
+### Connection Pooling
+
+Pulsar clients maintain connection pools automatically. Configure pool behavior:
+
+```yaml
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://pulsar.example.com:6650
+    webServiceUrl: http://pulsar.example.com:8080
+    tenant: infinitic
+    namespace: production
+    client:
+      connectionTimeout: 10
+      keepAliveInterval: 30
+      operationTimeout: 30
+```
+
+### Performance Tuning
+
+#### High Throughput
+
+```yaml
+transport:
+  pulsar:
+    # ... connection settings ...
+    producer:
+      compressionType: LZ4
+      batchingMaxMessages: 10000
+      batchingMaxPublishDelay: 100
+      sendTimeout: 60
+    consumer:
+      receiverQueueSize: 5000
+      acknowledgmentGroupTime: 100
+```
+
+#### Low Latency
+
+```yaml
+transport:
+  pulsar:
+    # ... connection settings ...
+    producer:
+      batchingMaxMessages: 100
+      batchingMaxPublishDelay: 1
+      sendTimeout: 10
+    consumer:
+      receiverQueueSize: 100
+      acknowledgmentGroupTime: 1
+```
+
+## InMemory Transport
+
+The InMemory transport is ideal for local development, testing, and single-process applications.
+
+### YAML Configuration
+
+```yaml
+transport:
+  inMemory:
+    shutdownGracePeriodSeconds: 5.0
+```
+
+### Programmatic Configuration
+
+```java
+import io.infinitic.transport.config.InMemoryTransportConfig;
+
+InMemoryTransportConfig transport = new InMemoryTransportConfig(
+    5.0  // shutdownGracePeriodSeconds
+);
+```
+
+### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `shutdownGracePeriodSeconds` | Double | 5.0 | Graceful shutdown duration in seconds |
+
+### Use Cases
+
+#### Unit Testing
+
+```java
+import io.infinitic.transport.config.InMemoryTransportConfig;
+import io.infinitic.workers.InfiniticWorker;
+import io.infinitic.clients.InfiniticClient;
+
+@Test
+void testWorkflow() {
+    InMemoryTransportConfig transport = new InMemoryTransportConfig();
+    
+    // Create worker and client with same transport
+    InfiniticWorker worker = InfiniticWorker.builder()
+        .setTransport(transport)
+        .build();
+    
+    InfiniticClient client = InfiniticClient.builder()
+        .setTransport(transport)
+        .build();
+    
+    worker.start();
+    
+    // Run tests
+    // ...
+    
+    worker.close();
+    client.close();
+}
+```
+
+#### Local Development
+
+```yaml
+# dev-config.yml
+transport:
+  inMemory:
+    shutdownGracePeriodSeconds: 5.0
+
+storage:
+  inMemory: {}
+
+services:
+  - name: MyService
+    executor:
+      class: com.example.MyServiceImpl
+      concurrency: 1
+```
+
+## Shutdown Grace Period
+
+The shutdown grace period determines how long the system waits to complete in-flight messages before shutting down.
+
+### Configuration
+
+```yaml
+transport:
+  pulsar:
+    # ... other settings ...
+    shutdownGracePeriodSeconds: 30.0
+```
+
+### Behavior
+
+1. **During shutdown**, the transport:
+   - Stops accepting new messages
+   - Allows existing messages to complete
+   - Waits up to `shutdownGracePeriodSeconds`
+   - Forces shutdown if grace period expires
+
+2. **Recommended values**:
+   - **Development**: 5-10 seconds
+   - **Production**: 30-60 seconds
+   - **Long-running tasks**: 60+ seconds
+
+## Best Practices
+
+### Production Deployments
+
+- **Use Pulsar transport** - InMemory is not suitable for production
+- **Enable authentication** - Always use authentication in production
+- **Configure TLS** - Encrypt connections with TLS
+- **Set appropriate timeouts** - Balance between reliability and latency
+- **Monitor connections** - Track connection health and pool usage
+
+### Development Environments
+
+- **Use InMemory for tests** - Simplifies test setup and teardown
+- **Use Pulsar for integration** - Test with production-like setup
+- **Short grace periods** - Faster feedback in development
+
+### High Availability
+
+```yaml
+transport:
+  pulsar:
+    brokerServiceUrl: pulsar://broker-1:6650,broker-2:6650,broker-3:6650
+    webServiceUrl: http://broker-1:8080,broker-2:8080,broker-3:8080
+    tenant: infinitic
+    namespace: production
+    allowedClusters:
+      - primary-cluster
+      - backup-cluster
+    client:
+      connectionTimeout: 10
+      operationTimeout: 30
+      keepAliveInterval: 30
+```
+
+## Troubleshooting
+
+### Connection Issues
+
+```yaml
+transport:
+  pulsar:
+    # ... other settings ...
+    client:
+      connectionTimeout: 30  # Increase if connections are timing out
+      operationTimeout: 60   # Increase for slow networks
+      keepAliveInterval: 30  # Adjust for network stability
+```
+
+### Performance Issues
+
+```yaml
+transport:
+  pulsar:
+    # ... other settings ...
+    producer:
+      compressionType: LZ4           # Enable compression
+      batchingMaxMessages: 10000     # Increase batch size
+      batchingMaxPublishDelay: 100   # Increase batch delay
+    consumer:
+      receiverQueueSize: 5000        # Increase queue size
+```
+
+### Authentication Errors
+
+```yaml
+transport:
+  pulsar:
+    # ... other settings ...
+    client:
+      authPluginClassName: org.apache.pulsar.client.impl.auth.AuthenticationToken
+      authParams: token:${PULSAR_TOKEN}  # Ensure token is valid
+```
+
+## See Also
+
+- [Worker Configuration](/configuration/workers) - Configure workers
+- [Client Configuration](/configuration/clients) - Configure clients
+- [Storage Configuration](/configuration/storage) - Configure state storage
